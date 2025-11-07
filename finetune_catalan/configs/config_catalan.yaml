@@ -1,0 +1,108 @@
+# Configuración para Fine-tuning de Orpheus TTS en Catalán
+# Con soporte para variantes dialectales
+
+# Dataset - CAMBIAR A TU DATASET PROCESADO
+TTS_dataset: "tu_usuario/orpheus-catalan-tts"  # O ruta local como "./data/tokenized"
+
+# Modelo base
+model_name: "canopylabs/orpheus-tts-0.1-pretrained"
+
+# Configuración de entrenamiento
+training:
+  epochs: 3
+  batch_size: 2  # Ajustar según GPU disponible
+  gradient_accumulation_steps: 4  # Para simular batch_size mayor
+  learning_rate: 5.0e-5
+  warmup_steps: 500
+  max_grad_norm: 1.0
+  weight_decay: 0.01
+
+  # Optimizador
+  optimizer: "adamw_torch"
+  lr_scheduler_type: "cosine"
+
+  # Precisión
+  fp16: false
+  bf16: true  # Recomendado para A100/H100
+
+  # Guardado de checkpoints
+  save_strategy: "steps"
+  save_steps: 500
+  save_total_limit: 3
+
+  # Evaluación
+  evaluation_strategy: "steps"
+  eval_steps: 500
+
+  # Logging
+  logging_steps: 50
+  report_to: "wandb"  # O "tensorboard"
+
+# Configuración de datos
+data:
+  max_length: 8192
+  pad_token: 128263
+  preprocessing_num_workers: 8
+
+  # Dialectos a incluir (dejar vacío para todos)
+  accents:
+    - balearic
+    - central
+    - northern
+    - northwestern
+    - valencian
+
+  # Mapeo de voces por dialecto
+  voice_mapping:
+    balearic: "maria"
+    central: "pau"
+    northern: "montse"
+    northwestern: "jordi"
+    valencian: "carla"
+
+# Configuración del modelo
+model_config:
+  attn_implementation: "flash_attention_2"  # Requiere flash-attn instalado
+  use_cache: false  # Desactivar para entrenamiento
+
+# Rutas de salida
+paths:
+  save_folder: "./checkpoints"
+  output_dir: "./output"
+  logging_dir: "./logs"
+
+# Configuración de WandB
+wandb:
+  project_name: "orpheus-catalan-tts"
+  run_name: "catalan-dialectal-5e5"
+  entity: null  # Tu usuario/organización de wandb
+
+# Configuración avanzada (opcional)
+advanced:
+  # Para LoRA fine-tuning (más eficiente en memoria)
+  use_lora: false
+  lora_config:
+    r: 16
+    lora_alpha: 32
+    target_modules: ["q_proj", "v_proj", "k_proj", "o_proj"]
+    lora_dropout: 0.05
+    bias: "none"
+
+  # Para gradient checkpointing (reduce uso de memoria)
+  gradient_checkpointing: true
+
+  # Para entrenamiento distribuido
+  distributed:
+    num_processes: 1  # Número de GPUs
+    mixed_precision: "bf16"
+
+# Configuración específica para RunPod
+runpod:
+  # Tipo de GPU recomendada
+  gpu_type: "RTX 4090"  # O "A100", "H100"
+  min_vram: 24  # GB mínimos recomendados
+
+  # Configuración de red
+  persist_data: true
+  data_volume: "/workspace/data"
+  checkpoint_volume: "/workspace/checkpoints"
