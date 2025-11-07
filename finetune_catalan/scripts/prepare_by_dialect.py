@@ -412,12 +412,12 @@ def load_and_process_dataset(dataset_name, args):
     print(f"✓ Dataset creado con {len(processed_dataset)} ejemplos")
 
     # Aplicar Audio feature
-    print("\n🎵 Aplicando Audio feature...")
-    processed_dataset = processed_dataset.cast_column(
-        'audio',
-        Audio(sampling_rate=args.target_sample_rate)
-    )
-    print("✅ Audio feature aplicada correctamente")
+    #print("\n🎵 Aplicando Audio feature...")
+    #processed_dataset = processed_dataset.cast_column(
+    #    'audio',
+    #    Audio(sampling_rate=args.target_sample_rate)
+    #)
+    #print("✅ Audio feature aplicada correctamente")
 
     print(f"\n✅ Dataset procesado: {len(processed_dataset)} ejemplos")
         # Estadísticas
