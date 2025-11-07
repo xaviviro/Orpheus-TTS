@@ -88,6 +88,12 @@ def parse_args():
         action='store_true',
         help='Guardar metadata de hablantes para posterior voice cloning'
     )
+    parser.add_argument(
+        '--num_workers',
+        type=int,
+        default=None,
+        help='Número de workers (no usado, mantenido por compatibilidad con bash script)'
+    )
     return parser.parse_args()
 
 
