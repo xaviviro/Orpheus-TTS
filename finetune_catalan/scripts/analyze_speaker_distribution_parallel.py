@@ -82,39 +82,25 @@ def process_batch(batch):
     Procesa un batch de ejemplos y retorna contadores locales.
 
     Esta función se ejecuta en paralelo en múltiples procesos.
+    Solo procesa client_id para máxima velocidad.
     """
     local_speaker_counts = Counter()
-    local_speaker_genders = defaultdict(set)
-    local_speaker_ages = defaultdict(set)
 
     for example in batch:
         speaker_id = example.get('client_id', 'unknown')
         local_speaker_counts[speaker_id] += 1
 
-        if example.get('gender'):
-            local_speaker_genders[speaker_id].add(example['gender'])
-        if example.get('age'):
-            local_speaker_ages[speaker_id].add(example['age'])
-
-    return local_speaker_counts, local_speaker_genders, local_speaker_ages
+    return local_speaker_counts
 
 
 def merge_results(results):
     """Combina resultados de múltiples procesos."""
     combined_counts = Counter()
-    combined_genders = defaultdict(set)
-    combined_ages = defaultdict(set)
 
-    for counts, genders, ages in results:
+    for counts in results:
         combined_counts.update(counts)
 
-        for speaker, gender_set in genders.items():
-            combined_genders[speaker].update(gender_set)
-
-        for speaker, age_set in ages.items():
-            combined_ages[speaker].update(age_set)
-
-    return combined_counts, combined_genders, combined_ages
+    return combined_counts
 
 
 def analyze_dataset_parallel(dataset_name, args):
@@ -127,11 +113,21 @@ def analyze_dataset_parallel(dataset_name, args):
     num_workers = args.num_workers or cpu_count()
     print(f"\nUsando {num_workers} workers para procesamiento paralelo")
 
-    # Cargar dataset en modo streaming sin audio
-    print("Cargando dataset en modo streaming (sin audio)...")
+    # Cargar dataset en modo streaming - SOLO client_id para máxima velocidad
+    print("Cargando dataset en modo streaming (solo client_id)...")
     try:
         ds = load_dataset(dataset_name, split='train', streaming=True)
-        ds = ds.remove_columns(['audio'])
+
+        # Obtener nombres de todas las columnas
+        column_names = ds.column_names
+
+        # Remover TODAS las columnas excepto client_id
+        # Esto es MUCHO más rápido que cargar todo el dataset
+        columns_to_remove = [col for col in column_names if col != 'client_id']
+        ds = ds.remove_columns(columns_to_remove)
+
+        print(f"✓ Solo cargando columna 'client_id' ({len(columns_to_remove)} columnas omitidas)")
+
     except Exception as e:
         print(f"Error cargando dataset: {e}")
         return None
@@ -182,7 +178,7 @@ def analyze_dataset_parallel(dataset_name, args):
 
     # Combinar resultados
     print("\nCombinando resultados de todos los workers...")
-    speaker_counts, speaker_genders, speaker_ages = merge_results(results)
+    speaker_counts = merge_results(results)
 
     print(f"✓ Procesadas {total_samples} muestras totales")
     print(f"  {len(speaker_counts)} hablantes únicos encontrados")
@@ -191,15 +187,17 @@ def analyze_dataset_parallel(dataset_name, args):
     return compute_statistics(
         dataset_name,
         speaker_counts,
-        speaker_genders,
-        speaker_ages,
         total_samples,
         args
     )
 
 
-def compute_statistics(dataset_name, speaker_counts, speaker_genders, speaker_ages, total_samples, args):
-    """Calcula estadísticas del análisis."""
+def compute_statistics(dataset_name, speaker_counts, total_samples, args):
+    """
+    Calcula estadísticas del análisis.
+
+    Solo usa speaker_counts para máxima velocidad (sin gender/age).
+    """
 
     total_speakers = len(speaker_counts)
     variant = get_variant_from_dataset_name(dataset_name)
@@ -278,8 +276,7 @@ def compute_statistics(dataset_name, speaker_counts, speaker_genders, speaker_ag
     if speakers_for_fixed:
         print(f"\n  Top 5 candidatos para voces fijas:")
         for i, (speaker, count) in enumerate(speakers_for_fixed[:5], 1):
-            gender = list(speaker_genders[speaker])[0] if speaker_genders[speaker] else 'unknown'
-            print(f"    {i}. {speaker[:10]}... : {count} muestras, {gender}")
+            print(f"    {i}. {speaker[:10]}... : {count} muestras")
     else:
         print(f"    ⚠️  No hay hablantes con suficientes muestras para voces fijas")
 
