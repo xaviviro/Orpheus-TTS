@@ -92,7 +92,13 @@ def parse_args():
         '--num_workers',
         type=int,
         default=None,
-        help='Número de workers (no usado, mantenido por compatibilidad con bash script)'
+        help='Número de workers para filtrado con multiprocessing'
+    )
+    parser.add_argument(
+        '--hf_repo',
+        type=str,
+        default=None,
+        help='Repositorio de HuggingFace para subir cada dialecto (ej: xaviviro/cv_23_ca_distilled)'
     )
     return parser.parse_args()
 
@@ -181,12 +187,18 @@ def load_and_process_dataset(dataset_name, args):
 
     print(f"📊 Muestras iniciales: {len(dataset):,}")
 
+    # Determinar número de workers para filtrado
+    num_proc = args.num_workers if args.num_workers else None
+
     # Filtrar por duración
-    print(f"\nFiltrando por duración ({args.min_duration}s - {args.max_duration}s)...")
+    print(f"\n🔍 Filtrando por duración ({args.min_duration}s - {args.max_duration}s)...")
+    if num_proc:
+        print(f"  Usando {num_proc} procesos")
     original_len = len(dataset)
     dataset = dataset.filter(
         lambda x: filter_by_duration(x, args.min_duration, args.max_duration),
-        desc="🔍 Filtrando por duración"
+        num_proc=num_proc,
+        desc="Filtrando por duración"
     )
     filtered_len = len(dataset)
     print(f"✓ Filtrado completado: {filtered_len}/{original_len} muestras ({filtered_len/original_len*100:.1f}% conservadas)")
@@ -207,10 +219,14 @@ def load_and_process_dataset(dataset_name, args):
     print(f"Hablantes totales: {len(speaker_counts)}")
     print(f"Hablantes con >={args.min_samples_per_speaker} muestras: {len(valid_speakers)}")
 
+    print("\n🔍 Filtrando por hablantes válidos...")
+    if num_proc:
+        print(f"  Usando {num_proc} procesos")
     original_filtered = len(dataset)
     dataset = dataset.filter(
         lambda x: x.get('client_id', 'unknown') in valid_speakers,
-        desc="🔍 Filtrando hablantes"
+        num_proc=num_proc,
+        desc="Filtrando hablantes"
     )
     after_speaker_filter = len(dataset)
     print(f"✓ Muestras después de filtrar hablantes: {after_speaker_filter}/{original_filtered} ({after_speaker_filter/original_filtered*100:.1f}% conservadas)")
@@ -343,6 +359,29 @@ def main():
             all_datasets.append(processed_ds)
 
             dialect = get_variant_from_dataset_name(dataset_name)
+
+            # Guardar cada dialecto por separado
+            dialect_dir = output_dir / dialect
+            print(f"\n💾 Guardando dialecto '{dialect}' en: {dialect_dir}")
+            processed_ds.save_to_disk(str(dialect_dir))
+            print("✓ Dialecto guardado localmente")
+
+            # Subir a HuggingFace si se especificó repo
+            if args.hf_repo:
+                try:
+                    print(f"\n☁️  Subiendo '{dialect}' a HuggingFace Hub...")
+                    print(f"   Repo: {args.hf_repo}")
+                    print(f"   Config: {dialect}")
+                    processed_ds.push_to_hub(
+                        args.hf_repo,
+                        config_name=dialect,
+                        commit_message=f"Add {dialect} dialect (max {args.max_samples_per_speaker} samples/speaker)"
+                    )
+                    print(f"✅ Dialecto '{dialect}' subido exitosamente")
+                    print(f"   URL: https://huggingface.co/datasets/{args.hf_repo}/tree/main/{dialect}")
+                except Exception as e:
+                    print(f"⚠️  Error subiendo '{dialect}' a HuggingFace: {e}")
+                    print("   Continuando con el siguiente dialecto...")
 
             # Guardar estadísticas básicas (sin iterar sobre el dataset)
             dialect_stats[dialect] = {
