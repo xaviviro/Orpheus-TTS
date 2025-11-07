@@ -116,11 +116,33 @@ def analyze_dataset(dataset_name, args):
     print(f"\n  ✅ Procesadas {total_samples} muestras totales")
     print(f"Total de muestras: {total_samples}")
 
-    # Estadísticas
+    # Estadísticas - calcular sin crear lista completa para ahorrar memoria
     total_speakers = len(speaker_counts)
-    samples_per_speaker = list(speaker_counts.values())
 
     variant = get_variant_from_dataset_name(dataset_name)
+
+    # Solo guardar top speakers para ahorrar memoria (no todos los 50k+)
+    top_speakers = speaker_counts.most_common(1000)  # Solo top 1000
+
+    # Calcular estadísticas directamente desde el Counter sin crear lista completa
+    counts_values = speaker_counts.values()
+    min_samples = min(counts_values)
+    max_samples = max(counts_values)
+    total_count = sum(counts_values)
+    mean_samples = total_count / total_speakers
+
+    # Para mediana, necesitamos ordenar - limitamos a sample pequeño
+    sorted_samples = sorted(counts_values)
+    median_samples = sorted_samples[len(sorted_samples)//2]
+
+    # Calcular distribución
+    distribution_ranges = {
+        '1-9': sum(1 for c in counts_values if c < 10),
+        '10-49': sum(1 for c in counts_values if 10 <= c < 50),
+        '50-99': sum(1 for c in counts_values if 50 <= c < 100),
+        '100-199': sum(1 for c in counts_values if 100 <= c < 200),
+        '200+': sum(1 for c in counts_values if c >= 200)
+    }
 
     stats = {
         'dataset_name': dataset_name,
@@ -128,14 +150,18 @@ def analyze_dataset(dataset_name, args):
         'total_samples': total_samples,
         'total_speakers': total_speakers,
         'samples_per_speaker': {
-            'min': min(samples_per_speaker),
-            'max': max(samples_per_speaker),
-            'mean': sum(samples_per_speaker) / len(samples_per_speaker),
-            'median': sorted(samples_per_speaker)[len(samples_per_speaker)//2]
+            'min': min_samples,
+            'max': max_samples,
+            'mean': mean_samples,
+            'median': median_samples
         },
-        'speaker_counts': dict(speaker_counts.most_common()),
-        'speaker_durations': dict(speaker_durations)
+        'distribution_ranges': distribution_ranges,  # Distribución agregada
+        'speaker_counts': dict(top_speakers),  # Solo top 1000 para no consumir toda la RAM
+        'speaker_durations': {k: speaker_durations[k] for k, _ in top_speakers[:100]}  # Solo top 100
     }
+
+    # Limpiar para liberar memoria
+    del sorted_samples
 
     # Análisis para estrategias
     speakers_for_fixed = [
@@ -185,22 +211,10 @@ def analyze_dataset(dataset_name, args):
     print(f"    - {len(speakers_for_multispeaker)} hablantes")
     print(f"    - {stats['strategy_analysis']['multispeaker']['total_samples']} muestras totales")
 
-    # Distribución
-    distribution = Counter()
-    for count in samples_per_speaker:
-        if count < 10:
-            distribution['1-9'] += 1
-        elif count < 50:
-            distribution['10-49'] += 1
-        elif count < 100:
-            distribution['50-99'] += 1
-        elif count < 200:
-            distribution['100-199'] += 1
-        else:
-            distribution['200+'] += 1
-
+    # Distribución (ya calculada en stats['distribution_ranges'])
     print(f"\n  Distribución de hablantes:")
-    for range_name, count in sorted(distribution.items()):
+    for range_name in ['1-9', '10-49', '50-99', '100-199', '200+']:
+        count = stats['distribution_ranges'][range_name]
         pct = count / total_speakers * 100
         print(f"    {range_name} muestras: {count} hablantes ({pct:.1f}%)")
 
@@ -242,13 +256,13 @@ def create_visualizations(all_stats, output_dir):
             axes[0, 1].set_title('Top 20 hablantes')
             axes[0, 1].invert_yaxis()
 
-            # Distribución acumulativa
-            sorted_samples = sorted(samples, reverse=True)
+            # Distribución acumulativa (solo top 1000 para evitar OOM)
+            sorted_samples = sorted(samples, reverse=True)[:1000]  # Limitar a top 1000
             cumsum = [sum(sorted_samples[:i+1]) for i in range(len(sorted_samples))]
             axes[1, 0].plot(cumsum)
-            axes[1, 0].set_xlabel('Número de hablantes')
+            axes[1, 0].set_xlabel('Número de hablantes (top 1000)')
             axes[1, 0].set_ylabel('Muestras acumuladas')
-            axes[1, 0].set_title('Muestras acumuladas por hablantes')
+            axes[1, 0].set_title('Muestras acumuladas por top hablantes')
             axes[1, 0].grid(True)
 
             # Resumen de estadísticas

@@ -2,9 +2,10 @@
 
 ## 🚀 Por donde empezar
 
-1. **[RESUMEN.md](RESUMEN.md)** - Visión general del proyecto (empieza aquí primero)
-2. **[QUICKSTART.md](QUICKSTART.md)** - Guía rápida para empezar en 10 minutos
-3. **[README.md](README.md)** - Documentación completa y detallada
+1. **[SETUP_COMPLETO.md](SETUP_COMPLETO.md)** - ⭐ Setup completo en RunPod (EMPIEZA AQUÍ)
+2. **[RESUMEN.md](RESUMEN.md)** - Visión general del proyecto
+3. **[QUICKSTART.md](QUICKSTART.md)** - Guía rápida para empezar en 10 minutos
+4. **[README.md](README.md)** - Documentación completa y detallada
 
 ## 📖 Guías Específicas
 
