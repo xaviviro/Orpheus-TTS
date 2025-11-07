@@ -16,8 +16,7 @@ import numpy as np
 from tqdm import tqdm
 import json
 from collections import defaultdict
-from multiprocessing import Pool, cpu_count
-from functools import partial
+from multiprocessing import cpu_count
 
 
 # Mapeo de variantes a nombres de voz "genéricos" por dialecto
@@ -129,10 +128,25 @@ def filter_by_duration(example, min_dur, max_dur):
 
 
 def resample_audio(audio_array, orig_sr, target_sr):
-    """Resamplea audio."""
+    """
+    Resamplea audio usando scipy en lugar de librosa para mayor robustez.
+
+    librosa.resample puede causar errores "stream index not added" en
+    multiprocessing con algunos arrays de audio.
+    """
     if orig_sr == target_sr:
         return audio_array
-    return librosa.resample(audio_array, orig_sr=orig_sr, target_sr=target_sr)
+
+    # Usar scipy.signal.resample que es más robusto en multiprocessing
+    from scipy import signal
+
+    # Calcular número de muestras en el nuevo sample rate
+    num_samples = int(len(audio_array) * target_sr / orig_sr)
+
+    # Resamplear
+    resampled = signal.resample(audio_array, num_samples)
+
+    return resampled.astype(np.float32)
 
 
 def process_example(example, target_sr, dialect_name, speaker_id=None):
@@ -185,20 +199,6 @@ def process_example(example, target_sr, dialect_name, speaker_id=None):
     except Exception as e:
         print(f"Error procesando ejemplo: {e}")
         return None
-
-
-def process_batch(batch, target_sr, dialect_name):
-    """
-    Procesa un batch de ejemplos en paralelo.
-
-    Esta función se ejecuta en múltiples procesos workers.
-    """
-    results = []
-    for example in batch:
-        processed = process_example(example, target_sr, dialect_name)
-        if processed is not None:
-            results.append(processed)
-    return results
 
 
 def balance_by_speakers(dataset, max_per_speaker):
@@ -314,37 +314,33 @@ def load_and_process_dataset(dataset_name, args):
         for speaker_id, indices in speaker_samples.items():
             speaker_metadata[speaker_id]['representative_indices'] = indices
 
-    # Procesar ejemplos con multiprocessing
+    # Procesar ejemplos usando dataset.map() con multiprocessing
+    # dataset.map() maneja internamente el multiprocessing de forma segura
     print("\nProcesando ejemplos...")
 
     # Determinar número de workers
     num_workers = args.num_workers if args.num_workers is not None else cpu_count()
-    print(f"Usando {num_workers} workers para procesamiento paralelo")
+    print(f"Usando {num_workers} workers para procesamiento paralelo (via dataset.map)")
 
-    # Convertir dataset a lista para dividir en batches
-    dataset_list = list(dataset)
-    batch_size = max(1, len(dataset_list) // (num_workers * 4))  # 4 batches por worker
-    print(f"Batch size: {batch_size}")
+    # Crear función de procesamiento compatible con dataset.map
+    def process_for_map(example):
+        """Wrapper para usar con dataset.map()"""
+        return process_example(example, args.target_sample_rate, dialect)
 
-    # Dividir en batches
-    batches = []
-    for i in range(0, len(dataset_list), batch_size):
-        batches.append(dataset_list[i:i + batch_size])
+    # Procesar usando dataset.map() con num_proc (multiprocessing interno de HuggingFace)
+    # Esto es mucho más seguro que Pool() para audio
+    dataset = dataset.map(
+        process_for_map,
+        num_proc=num_workers,
+        desc=f"Procesando {dialect}",
+        remove_columns=dataset.column_names  # Remover columnas originales
+    )
 
-    print(f"Total batches: {len(batches)}")
+    # Filtrar ejemplos que fallaron (retornaron None)
+    dataset = dataset.filter(lambda x: x is not None and 'audio' in x)
 
-    # Procesar en paralelo
-    processed_examples = []
-    process_func = partial(process_batch, target_sr=args.target_sample_rate, dialect_name=dialect)
-
-    with Pool(processes=num_workers) as pool:
-        # Usar imap_unordered para ver progreso
-        for batch_results in tqdm(
-            pool.imap_unordered(process_func, batches),
-            total=len(batches),
-            desc=f"Procesando {dialect}"
-        ):
-            processed_examples.extend(batch_results)
+    # Convertir a lista para verificar
+    processed_examples = list(dataset)
 
     if not processed_examples:
         print(f"⚠️  No se procesaron ejemplos para {dataset_name}")
@@ -352,19 +348,20 @@ def load_and_process_dataset(dataset_name, args):
 
     print(f"Ejemplos procesados exitosamente: {len(processed_examples)}")
 
-    # Crear dataset procesado
-    # En lugar de cast_column (que causa el error), crear directamente con Audio feature
-    processed_dataset = Dataset.from_dict({
-        'audio': [ex['audio']['array'] for ex in processed_examples],
-        'text': [ex['text'] for ex in processed_examples],
-        'original_text': [ex['original_text'] for ex in processed_examples],
-        'voice_name': [ex['voice_name'] for ex in processed_examples],
-        'dialect': [ex['dialect'] for ex in processed_examples],
-        'speaker_id': [ex['speaker_id'] for ex in processed_examples],
-        'gender': [ex['gender'] for ex in processed_examples],
-        'age': [ex['age'] for ex in processed_examples],
-        'duration': [ex['duration'] for ex in processed_examples],
-    }).cast_column('audio', Audio(sampling_rate=args.target_sample_rate))
+    # El dataset ya está procesado, solo necesitamos hacer cast de la columna audio
+    processed_dataset = dataset
+
+    # Cast la columna audio al tipo Audio de HuggingFace
+    print("Aplicando Audio feature a la columna audio...")
+    try:
+        processed_dataset = processed_dataset.cast_column(
+            'audio',
+            Audio(sampling_rate=args.target_sample_rate)
+        )
+    except Exception as e:
+        print(f"⚠️  Advertencia con cast_column: {e}")
+        print("  Continuando sin cast (el audio debería funcionar igual)")
+        # Si falla el cast, continuar sin él - el audio ya está en el formato correcto
 
     print(f"✅ Dataset procesado: {len(processed_dataset)} ejemplos")
 

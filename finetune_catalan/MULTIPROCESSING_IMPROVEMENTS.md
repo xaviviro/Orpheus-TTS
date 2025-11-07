@@ -28,26 +28,33 @@ AttributeError: 'AudioEncoder' object has no attribute 'to_file_like'
 ### 3. Estructura de Procesamiento
 
 ```python
-# Función de batch processing (ejecutada en paralelo)
-def process_batch(batch, target_sr, dialect_name):
-    """
-    Procesa un batch de ejemplos en paralelo.
-    Esta función se ejecuta en múltiples procesos workers.
-    """
-    results = []
-    for example in batch:
-        processed = process_example(example, target_sr, dialect_name)
-        if processed is not None:
-            results.append(processed)
-    return results
+# Usar dataset.map() con multiprocessing interno (método seguro)
+def process_for_map(example):
+    """Wrapper para usar con dataset.map()"""
+    return process_example(example, args.target_sample_rate, dialect)
+
+# Procesar usando dataset.map() con num_proc
+dataset = dataset.map(
+    process_for_map,
+    num_proc=num_workers,
+    desc=f"Procesando {dialect}",
+    remove_columns=dataset.column_names
+)
 ```
 
 **Flow de procesamiento:**
-1. Dataset → Lista completa
-2. Dividir en batches (batch_size = total / (num_workers * 4))
-3. Procesar batches en paralelo con Pool
-4. Combinar resultados
-5. Crear Dataset final con Audio feature
+1. Cargar dataset de HuggingFace
+2. Filtrar por duración y hablantes
+3. Balancear muestras por hablante (opcional)
+4. Procesar con `dataset.map(num_proc=N)` - multiprocessing seguro
+5. Cast columna audio a Audio feature
+6. Guardar dataset procesado
+
+**¿Por qué dataset.map() en lugar de Pool()?**
+- `dataset.map()` está optimizado para trabajar con audio y datos de HuggingFace
+- Maneja internamente la serialización y estado de procesos
+- Evita errores de "stream index not added" de librosa/soundfile
+- Usa `scipy.signal.resample` que es más robusto que `librosa.resample` en multiprocessing
 
 ## Uso
 
