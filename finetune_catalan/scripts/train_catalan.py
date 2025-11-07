@@ -64,7 +64,7 @@ def load_model_and_tokenizer(config):
     # Cargar modelo
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        attn_implementation=model_config.get('attn_implementation', 'flash_attention_2'),
+        attn_implementation=model_config.get('attn_implementation', 'sdpa'),
         use_cache=model_config.get('use_cache', False),
         torch_dtype=torch.bfloat16 if config['training'].get('bf16', True) else torch.float32
     )

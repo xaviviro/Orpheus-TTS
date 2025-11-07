@@ -62,7 +62,7 @@ data:
 
 # Configuración del modelo
 model_config:
-  attn_implementation: "flash_attention_2"  # Requiere flash-attn instalado
+  attn_implementation: "sdpa"  # Scaled Dot Product Attention (nativo PyTorch 2.0+)
   use_cache: false  # Desactivar para entrenamiento
 
 # Rutas de salida
