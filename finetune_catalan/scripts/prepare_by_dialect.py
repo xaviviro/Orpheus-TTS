@@ -314,33 +314,19 @@ def load_and_process_dataset(dataset_name, args):
         for speaker_id, indices in speaker_samples.items():
             speaker_metadata[speaker_id]['representative_indices'] = indices
 
-    # Procesar ejemplos usando dataset.map() con multiprocessing
-    # dataset.map() maneja internamente el multiprocessing de forma segura
+    # Procesar ejemplos (secuencial debido a limitaciones de serialización de audio)
+    # El audio con formato dict {'array': ..., 'sampling_rate': ...} no se puede
+    # serializar correctamente en multiprocessing, causando errores de AudioEncoder
     print("\nProcesando ejemplos...")
 
-    # Determinar número de workers
-    num_workers = args.num_workers if args.num_workers is not None else cpu_count()
-    print(f"Usando {num_workers} workers para procesamiento paralelo (via dataset.map)")
+    # Nota: intentamos multiprocessing pero el formato de audio causa problemas
+    # La solución es procesar secuencialmente o usar un enfoque diferente
+    processed_examples = []
 
-    # Crear función de procesamiento compatible con dataset.map
-    def process_for_map(example):
-        """Wrapper para usar con dataset.map()"""
-        return process_example(example, args.target_sample_rate, dialect)
-
-    # Procesar usando dataset.map() con num_proc (multiprocessing interno de HuggingFace)
-    # Esto es mucho más seguro que Pool() para audio
-    dataset = dataset.map(
-        process_for_map,
-        num_proc=num_workers,
-        desc=f"Procesando {dialect}",
-        remove_columns=dataset.column_names  # Remover columnas originales
-    )
-
-    # Filtrar ejemplos que fallaron (retornaron None)
-    dataset = dataset.filter(lambda x: x is not None and 'audio' in x)
-
-    # Convertir a lista para verificar
-    processed_examples = list(dataset)
+    for example in tqdm(dataset, desc=f"Procesando {dialect}"):
+        processed = process_example(example, args.target_sample_rate, dialect)
+        if processed is not None:
+            processed_examples.append(processed)
 
     if not processed_examples:
         print(f"⚠️  No se procesaron ejemplos para {dataset_name}")
@@ -348,8 +334,9 @@ def load_and_process_dataset(dataset_name, args):
 
     print(f"Ejemplos procesados exitosamente: {len(processed_examples)}")
 
-    # El dataset ya está procesado, solo necesitamos hacer cast de la columna audio
-    processed_dataset = dataset
+    # Crear dataset desde lista de ejemplos procesados
+    print("Creando dataset desde ejemplos procesados...")
+    processed_dataset = Dataset.from_list(processed_examples)
 
     # Cast la columna audio al tipo Audio de HuggingFace
     print("Aplicando Audio feature a la columna audio...")
@@ -358,10 +345,10 @@ def load_and_process_dataset(dataset_name, args):
             'audio',
             Audio(sampling_rate=args.target_sample_rate)
         )
+        print("✅ Audio feature aplicada correctamente")
     except Exception as e:
         print(f"⚠️  Advertencia con cast_column: {e}")
-        print("  Continuando sin cast (el audio debería funcionar igual)")
-        # Si falla el cast, continuar sin él - el audio ya está en el formato correcto
+        print("  El audio sigue disponible, solo sin el tipo Audio formal")
 
     print(f"✅ Dataset procesado: {len(processed_dataset)} ejemplos")
 

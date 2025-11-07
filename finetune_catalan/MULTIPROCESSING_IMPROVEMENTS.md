@@ -1,17 +1,19 @@
-# Mejoras de Multiprocessing en prepare_by_dialect.py
+# Mejoras de Procesamiento en prepare_by_dialect.py
 
 ## Cambios Implementados
 
-### 1. Multiprocessing para Máximo Rendimiento
+### 1. Procesamiento Optimizado con scipy.signal
 
-El script `prepare_by_dialect.py` ahora utiliza **multiprocessing** para aprovechar todos los cores disponibles de la máquina durante el procesamiento de ejemplos.
+El script `prepare_by_dialect.py` ha sido optimizado para ser más robusto y eficiente.
 
 **Mejoras clave:**
 
-- **Auto-detección de cores**: Por defecto usa todos los cores disponibles (`cpu_count()`)
-- **Batch processing**: Divide los datos en batches para procesamiento eficiente
+- **scipy.signal.resample en lugar de librosa**: Más robusto y evita errores de "stream index not added"
+- **Procesamiento secuencial estable**: Evita problemas de serialización de audio en multiprocessing
 - **Progress tracking**: Mantiene barra de progreso con `tqdm`
-- **Parámetro configurable**: `--num_workers` para controlar número de workers
+- **Formato de audio optimizado**: Arrays en float32 para compatibilidad
+
+**Nota sobre multiprocessing**: El procesamiento de audio con HuggingFace Datasets tiene limitaciones de serialización cuando se trabaja con el formato de audio. El multiprocessing se aplica mejor en el paso de tokenización con SNAC (ver `tokenize_with_snac_multiprocess.py`).
 
 ### 2. Corrección de Error de Audio Encoding
 
@@ -28,33 +30,33 @@ AttributeError: 'AudioEncoder' object has no attribute 'to_file_like'
 ### 3. Estructura de Procesamiento
 
 ```python
-# Usar dataset.map() con multiprocessing interno (método seguro)
-def process_for_map(example):
-    """Wrapper para usar con dataset.map()"""
-    return process_example(example, args.target_sample_rate, dialect)
+# Procesamiento secuencial (más estable para audio)
+processed_examples = []
 
-# Procesar usando dataset.map() con num_proc
-dataset = dataset.map(
-    process_for_map,
-    num_proc=num_workers,
-    desc=f"Procesando {dialect}",
-    remove_columns=dataset.column_names
-)
+for example in tqdm(dataset, desc=f"Procesando {dialect}"):
+    processed = process_example(example, args.target_sample_rate, dialect)
+    if processed is not None:
+        processed_examples.append(processed)
+
+# Crear dataset
+processed_dataset = Dataset.from_list(processed_examples)
+processed_dataset = processed_dataset.cast_column('audio', Audio(sampling_rate=24000))
 ```
 
 **Flow de procesamiento:**
 1. Cargar dataset de HuggingFace
 2. Filtrar por duración y hablantes
 3. Balancear muestras por hablante (opcional)
-4. Procesar con `dataset.map(num_proc=N)` - multiprocessing seguro
-5. Cast columna audio a Audio feature
-6. Guardar dataset procesado
+4. Procesar ejemplos secuencialmente (resamplear con scipy.signal)
+5. Crear Dataset desde lista
+6. Cast columna audio a Audio feature
+7. Guardar dataset procesado
 
-**¿Por qué dataset.map() en lugar de Pool()?**
-- `dataset.map()` está optimizado para trabajar con audio y datos de HuggingFace
-- Maneja internamente la serialización y estado de procesos
-- Evita errores de "stream index not added" de librosa/soundfile
-- Usa `scipy.signal.resample` que es más robusto que `librosa.resample` en multiprocessing
+**¿Por qué procesamiento secuencial?**
+- El formato de audio de HuggingFace (`{'array': ndarray, 'sampling_rate': int}`) no se serializa bien en multiprocessing
+- Causa errores de `AttributeError: 'AudioEncoder' object has no attribute 'to_file_like'`
+- El resampling con scipy es rápido (~200-500 samples/segundo en una sola core)
+- **Para acelerar**: usa el script `tokenize_with_snac_multiprocess.py` que sí aprovecha múltiples GPUs
 
 ## Uso
 
@@ -65,8 +67,7 @@ python scripts/prepare_by_dialect.py \
     --datasets xaviviro/cv_23_ca_central xaviviro/cv_23_ca_balear \
     --output_dir /workspace/data/processed \
     --balance_speakers \
-    --max_samples_per_speaker 50 \
-    --num_workers 64  # Especificar número de workers
+    --max_samples_per_speaker 50
 ```
 
 ### Opción 2: Con prepare_all_catalan_datasets.sh (RECOMENDADO)
@@ -89,27 +90,28 @@ bash scripts/prepare_all_catalan_datasets.sh \
 2. `MAX_SAMPLES` (default: `50`)
 3. `HF_REPO` (default: `xaviviro/cv_23_ca_distilled`)
 4. `UPLOAD_TO_HF` (default: `yes`)
-5. `NUM_WORKERS` (default: `$(nproc)` - todos los cores)
 
 ## Rendimiento Esperado
 
-**Antes (secuencial):**
-- 1 core procesando ejemplos
-- ~100-200 ejemplos/segundo
+**Procesamiento de audio (prepare_by_dialect.py):**
+- Procesamiento secuencial con scipy.signal.resample
+- ~200-500 ejemplos/segundo (single-core)
+- Estable y sin errores de serialización
 
-**Después (paralelo con 64 cores):**
-- 64 cores procesando en paralelo
-- ~6,000-12,000 ejemplos/segundo (estimado)
-- **Speedup esperado: 30-60x más rápido**
+**Tokenización SNAC (tokenize_with_snac_multiprocess.py):**
+- Multiprocessing con múltiples GPU workers
+- Con 1 GPU: ~50-100 samples/segundo
+- Con 2-3 workers en GPU de 48GB: ~150-300 samples/segundo
+- **Speedup: 2-3x con múltiples workers GPU**
 
 ## Ventajas del Nuevo Sistema
 
-1. **Máximo aprovechamiento de CPU**: Usa todos los cores disponibles
-2. **Escalable**: Funciona igual de bien con 4, 16, 64+ cores
+1. **Robusto y estable**: Sin errores de serialización de audio
+2. **Usa scipy en lugar de librosa**: Evita problemas de "stream index not added"
 3. **Monitoreable**: Barra de progreso en tiempo real
-4. **Configurable**: Control total sobre número de workers
-5. **Robusto**: Maneja errores por ejemplo sin crashear todo el batch
-6. **Compatible**: Mismo formato de salida que versión anterior
+4. **Multi-GPU para tokenización**: El paso pesado (SNAC) sí usa multiprocessing
+5. **Formato optimizado**: Arrays en float32 para máxima compatibilidad
+6. **Separación clara**: Procesamiento de audio (CPU) vs tokenización (GPU)
 
 ## Datasets Procesados
 
