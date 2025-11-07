@@ -66,7 +66,7 @@ def load_model_and_tokenizer(config):
         model_name,
         attn_implementation=model_config.get('attn_implementation', 'sdpa'),
         use_cache=model_config.get('use_cache', False),
-        torch_dtype=torch.bfloat16 if config['training'].get('bf16', True) else torch.float32
+        dtype=torch.bfloat16 if config['training'].get('bf16', True) else torch.float32
     )
 
     # Habilitar gradient checkpointing si está configurado
@@ -199,7 +199,7 @@ def create_training_arguments(config):
         save_total_limit=training_config.get('save_total_limit', 3),
 
         # Evaluación
-        evaluation_strategy=training_config.get('evaluation_strategy', 'steps'),
+        eval_strategy=training_config.get('evaluation_strategy', 'steps'),
         eval_steps=training_config.get('eval_steps', 500),
 
         # Otros
