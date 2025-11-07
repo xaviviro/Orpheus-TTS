@@ -244,13 +244,13 @@ def balance_by_speakers(dataset, max_per_speaker):
     speaker_samples = defaultdict(list)
 
     # Agrupar por hablante
-    for i, example in enumerate(dataset):
+    for i, example in enumerate(tqdm(dataset, desc="📊 Agrupando por hablante")):
         speaker_id = example.get('client_id', 'unknown')
         speaker_samples[speaker_id].append(i)
 
     # Seleccionar hasta max_per_speaker de cada hablante
     selected_indices = []
-    for speaker, indices in speaker_samples.items():
+    for speaker, indices in tqdm(speaker_samples.items(), desc="⚖️  Balanceando hablantes"):
         if len(indices) <= max_per_speaker:
             selected_indices.extend(indices)
         else:
@@ -274,27 +274,33 @@ def load_and_process_dataset(dataset_name, args):
     print(f"Voz de entrenamiento: {DIALECT_VOICE_NAMES.get(dialect, dialect)}")
 
     # Cargar dataset
-    print("Cargando dataset...")
+    print("\n📥 Cargando dataset desde HuggingFace Hub...")
     try:
         dataset = load_dataset(dataset_name, split='train')
+        print("✓ Dataset cargado exitosamente")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Error cargando dataset: {e}")
         return None, None
 
-    print(f"Muestras cargadas: {len(dataset)}")
+    print(f"📊 Muestras iniciales: {len(dataset):,}")
 
     # Filtrar por duración
-    print("\nFiltrando por duración...")
+    print(f"\nFiltrando por duración ({args.min_duration}s - {args.max_duration}s)...")
+    original_len = len(dataset)
     dataset = dataset.filter(
         lambda x: filter_by_duration(x, args.min_duration, args.max_duration),
-        desc="Filtrando"
+        desc="🔍 Filtrando por duración"
     )
-    print(f"Después del filtro: {len(dataset)} muestras")
+    filtered_len = len(dataset)
+    print(f"✓ Filtrado completado: {filtered_len}/{original_len} muestras ({filtered_len/original_len*100:.1f}% conservadas)")
 
     # Analizar hablantes
     print("\nAnalizando hablantes...")
     from collections import Counter
-    speaker_counts = Counter(ex.get('client_id', 'unknown') for ex in dataset)
+    speaker_counts = Counter(
+        ex.get('client_id', 'unknown')
+        for ex in tqdm(dataset, desc="🔍 Analizando hablantes")
+    )
 
     # Filtrar hablantes con muy pocas muestras
     valid_speakers = {
@@ -305,17 +311,21 @@ def load_and_process_dataset(dataset_name, args):
     print(f"Hablantes totales: {len(speaker_counts)}")
     print(f"Hablantes con >={args.min_samples_per_speaker} muestras: {len(valid_speakers)}")
 
+    original_filtered = len(dataset)
     dataset = dataset.filter(
         lambda x: x.get('client_id', 'unknown') in valid_speakers,
-        desc="Filtrando hablantes"
+        desc="🔍 Filtrando hablantes"
     )
-    print(f"Muestras después de filtrar hablantes: {len(dataset)}")
+    after_speaker_filter = len(dataset)
+    print(f"✓ Muestras después de filtrar hablantes: {after_speaker_filter}/{original_filtered} ({after_speaker_filter/original_filtered*100:.1f}% conservadas)")
 
     # Balancear por hablantes si se solicita
     if args.balance_speakers:
-        print(f"\nBalanceando (max {args.max_samples_per_speaker} por hablante)...")
+        print(f"\n⚖️  Balanceando (max {args.max_samples_per_speaker} por hablante)...")
+        before_balance = len(dataset)
         dataset = balance_by_speakers(dataset, args.max_samples_per_speaker)
-        print(f"Muestras después de balancear: {len(dataset)}")
+        after_balance = len(dataset)
+        print(f"✓ Muestras después de balancear: {after_balance}/{before_balance} ({after_balance/before_balance*100:.1f}% conservadas)")
 
     # Limitar número total si se especifica
     if args.samples_per_dialect and len(dataset) > args.samples_per_dialect:
@@ -325,10 +335,10 @@ def load_and_process_dataset(dataset_name, args):
     # Guardar metadata de hablantes (para voice cloning posterior)
     speaker_metadata = None
     if args.save_speaker_metadata:
-        print("\nGuardando metadata de hablantes...")
+        print("\n📋 Guardando metadata de hablantes...")
         speaker_metadata = {}
 
-        for example in dataset:
+        for example in tqdm(dataset, desc="📝 Extrayendo metadata"):
             speaker_id = example.get('client_id', 'unknown')
             if speaker_id not in speaker_metadata:
                 speaker_metadata[speaker_id] = {
@@ -340,7 +350,7 @@ def load_and_process_dataset(dataset_name, args):
 
         # Agregar ejemplos representativos (primeros 3 de cada hablante)
         speaker_samples = defaultdict(list)
-        for i, example in enumerate(dataset):
+        for i, example in enumerate(tqdm(dataset, desc="🎯 Seleccionando ejemplos representativos")):
             speaker_id = example.get('client_id', 'unknown')
             if len(speaker_samples[speaker_id]) < 3:
                 speaker_samples[speaker_id].append(i)
@@ -348,13 +358,15 @@ def load_and_process_dataset(dataset_name, args):
         for speaker_id, indices in speaker_samples.items():
             speaker_metadata[speaker_id]['representative_indices'] = indices
 
+        print(f"✓ Metadata guardada para {len(speaker_metadata)} hablantes")
+
     # Procesar ejemplos con multiprocessing REAL
     # Convertimos el dataset a una lista de dicts simples (sin objetos complejos)
-    print("\nPreparando datos para procesamiento paralelo...")
+    print("\n🔄 Preparando datos para procesamiento paralelo...")
 
     # Extraer datos del dataset en formato simple
     simple_examples = []
-    for example in dataset:
+    for example in tqdm(dataset, desc="📦 Extrayendo arrays de audio"):
         simple_examples.append({
             'audio_array': example['audio']['array'],
             'audio_sr': example['audio']['sampling_rate'],
@@ -364,87 +376,71 @@ def load_and_process_dataset(dataset_name, args):
             'age': example.get('age', 'unknown'),
         })
 
-    print(f"Procesando {len(simple_examples)} ejemplos con multiprocessing...")
+    print(f"✓ Datos preparados: {len(simple_examples)} ejemplos listos")
 
     # Determinar número de workers
     num_workers = args.num_workers if args.num_workers is not None else cpu_count()
-    print(f"Usando {num_workers} workers")
+    print(f"🚀 Usando {num_workers} workers para procesamiento paralelo")
 
     # Preparar argumentos para cada worker (tuplas con simple_ex, target_sr, dialect)
     worker_args = [(ex, args.target_sample_rate, dialect) for ex in simple_examples]
 
     # Procesar en paralelo usando la función wrapper global
+    print(f"\n⚙️  Procesando {len(worker_args)} ejemplos en paralelo...")
     with Pool(processes=num_workers) as pool:
         processed_examples = list(tqdm(
             pool.imap(process_simple_example_wrapper, worker_args),
             total=len(worker_args),
-            desc=f"Procesando {dialect}"
+            desc=f"🎵 Procesando audio {dialect}",
+            unit="samples"
         ))
 
     # Filtrar Nones
+    print(f"\n🔍 Filtrando resultados...")
     processed_examples = [ex for ex in processed_examples if ex is not None]
 
     if not processed_examples:
         print(f"⚠️  No se procesaron ejemplos para {dataset_name}")
         return None, None
 
-    print(f"Ejemplos procesados exitosamente: {len(processed_examples)}")
+    success_rate = len(processed_examples) / len(worker_args) * 100
+    print(f"✅ Ejemplos procesados exitosamente: {len(processed_examples)}/{len(worker_args)} ({success_rate:.1f}%)")
 
-    # Crear dataset desde lista de ejemplos procesados
-    # Para evitar problemas con AudioEncoder, guardar arrays como bytes en la columna audio
-    print("Creando dataset desde ejemplos procesados...")
+    # Crear dataset directamente desde la lista de dicts
+    print("\n🔨 Creando HuggingFace Dataset...")
+    processed_dataset = Dataset.from_list(processed_examples)
+    print(f"✓ Dataset creado con {len(processed_dataset)} ejemplos")
 
-    # Preparar datos para Dataset - mantener audio como dict pero será parseado correctamente
-    dataset_data = {
-        'audio': [],
-        'text': [],
-        'original_text': [],
-        'voice_name': [],
-        'dialect': [],
-        'speaker_id': [],
-        'gender': [],
-        'age': [],
-        'duration': [],
-    }
+    # Aplicar Audio feature
+    print("\n🎵 Aplicando Audio feature...")
+    processed_dataset = processed_dataset.cast_column(
+        'audio',
+        Audio(sampling_rate=args.target_sample_rate)
+    )
+    print("✅ Audio feature aplicada correctamente")
 
-    for ex in processed_examples:
-        # Para cada ejemplo, agregar el array de audio directamente
-        dataset_data['audio'].append({
-            'array': ex['audio']['array'],
-            'sampling_rate': ex['audio']['sampling_rate']
-        })
-        dataset_data['text'].append(ex['text'])
-        dataset_data['original_text'].append(ex['original_text'])
-        dataset_data['voice_name'].append(ex['voice_name'])
-        dataset_data['dialect'].append(ex['dialect'])
-        dataset_data['speaker_id'].append(ex['speaker_id'])
-        dataset_data['gender'].append(ex['gender'])
-        dataset_data['age'].append(ex['age'])
-        dataset_data['duration'].append(ex['duration'])
+    print(f"\n✅ Dataset procesado: {len(processed_dataset)} ejemplos")
+        # Estadísticas
+    print("\n📊 Calculando estadísticas finales...")
+    final_speaker_counts = Counter(
+        ex['speaker_id']
+        for ex in tqdm(processed_dataset, desc="🔢 Contando hablantes")
+    )
 
-    # Crear dataset desde el dict - HuggingFace inferirá los tipos automáticamente
-    print("Creando dataset...")
-    processed_dataset = Dataset.from_dict(dataset_data)
+    total_duration = sum(
+        ex['duration']
+        for ex in tqdm(processed_dataset, desc="⏱️  Calculando duración total")
+    )
 
-    # Intentar aplicar Audio feature (opcional, el dataset funciona sin esto)
-    try:
-        processed_dataset = processed_dataset.cast_column(
-            'audio',
-            Audio(sampling_rate=args.target_sample_rate)
-        )
-        print("✅ Dataset creado con Audio feature")
-    except Exception as e:
-        print(f"⚠️  Audio feature no aplicada (dataset funcional igualmente)")
-        # No es crítico - el dataset se puede usar sin el tipo Audio formal
-
-    print(f"✅ Dataset procesado: {len(processed_dataset)} ejemplos")
-
-    # Estadísticas
-    final_speaker_counts = Counter(ex['speaker_id'] for ex in processed_dataset)
-    print(f"\nEstadísticas finales:")
-    print(f"  Hablantes únicos: {len(final_speaker_counts)}")
-    print(f"  Promedio muestras/hablante: {len(processed_dataset)/len(final_speaker_counts):.1f}")
-    print(f"  Duración total: {sum(ex['duration'] for ex in processed_dataset)/3600:.2f} horas")
+    print("\n" + "="*70)
+    print(f"ESTADÍSTICAS FINALES - {dialect.upper()}")
+    print("="*70)
+    print(f"  📝 Ejemplos totales: {len(processed_dataset):,}")
+    print(f"  👥 Hablantes únicos: {len(final_speaker_counts):,}")
+    print(f"  📊 Promedio muestras/hablante: {len(processed_dataset)/len(final_speaker_counts):.1f}")
+    print(f"  ⏱️  Duración total: {total_duration/3600:.2f} horas ({total_duration/60:.1f} minutos)")
+    print(f"  ⏱️  Duración promedio/muestra: {total_duration/len(processed_dataset):.1f} segundos")
+    print("="*70)
 
     return processed_dataset, speaker_metadata
 
@@ -469,17 +465,30 @@ def main():
     dialect_stats = {}
 
     # Procesar cada dataset
-    for dataset_name in args.datasets:
+    print(f"\n🔄 Procesando {len(args.datasets)} dataset(s)...")
+    for idx, dataset_name in enumerate(args.datasets, 1):
+        print(f"\n{'='*70}")
+        print(f"📦 Dataset {idx}/{len(args.datasets)}: {dataset_name}")
+        print(f"{'='*70}")
+
         processed_ds, speaker_meta = load_and_process_dataset(dataset_name, args)
 
         if processed_ds is not None:
             all_datasets.append(processed_ds)
 
             dialect = get_variant_from_dataset_name(dataset_name)
+
+            print(f"\n📊 Calculando estadísticas del dialecto {dialect}...")
             dialect_stats[dialect] = {
                 'samples': len(processed_ds),
-                'speakers': len(set(ex['speaker_id'] for ex in processed_ds)),
-                'duration_hours': sum(ex['duration'] for ex in processed_ds) / 3600
+                'speakers': len(set(
+                    ex['speaker_id']
+                    for ex in tqdm(processed_ds, desc="🔢 Contando hablantes únicos")
+                )),
+                'duration_hours': sum(
+                    ex['duration']
+                    for ex in tqdm(processed_ds, desc="⏱️  Sumando duración")
+                ) / 3600
             }
 
             if speaker_meta:
@@ -491,19 +500,23 @@ def main():
 
     # Combinar datasets
     print("\n" + "="*70)
-    print("COMBINANDO DIALECTOS")
+    print("🔗 COMBINANDO DIALECTOS")
     print("="*70)
 
+    print(f"\n📦 Concatenando {len(all_datasets)} datasets...")
     combined_dataset = concatenate_datasets(all_datasets)
-    print(f"Total combinado: {len(combined_dataset)} muestras")
+    print(f"✓ Total combinado: {len(combined_dataset):,} muestras")
 
     # Mezclar
-    print("Mezclando...")
+    print("\n🔀 Mezclando dataset...")
     combined_dataset = combined_dataset.shuffle(seed=42)
+    print("✓ Dataset mezclado")
 
     # Dividir train/validation
-    print("Dividiendo train/validation (90/10)...")
+    print("\n✂️  Dividiendo train/validation (90/10)...")
     split = combined_dataset.train_test_split(test_size=0.1, seed=42)
+    print(f"✓ Train: {len(split['train']):,} muestras")
+    print(f"✓ Validation: {len(split['test']):,} muestras")
 
     dataset_dict = DatasetDict({
         'train': split['train'],
@@ -511,38 +524,58 @@ def main():
     })
 
     # Guardar
-    print(f"\nGuardando en: {output_dir}")
+    print(f"\n💾 Guardando dataset en: {output_dir}")
     dataset_dict.save_to_disk(str(output_dir))
+    print("✓ Dataset guardado en disco")
 
     # Guardar metadata de hablantes
     if all_speaker_metadata:
+        print("\n📝 Guardando metadata de hablantes...")
         metadata_path = output_dir / 'speaker_metadata.json'
         with open(metadata_path, 'w', encoding='utf-8') as f:
             json.dump(all_speaker_metadata, f, indent=2, ensure_ascii=False)
-        print(f"Metadata de hablantes guardada: {metadata_path}")
+        print(f"✓ Metadata guardada: {metadata_path}")
 
     # Guardar estadísticas
+    print("\n📊 Guardando estadísticas...")
     stats_path = output_dir / 'dialect_statistics.json'
     with open(stats_path, 'w', encoding='utf-8') as f:
         json.dump(dialect_stats, f, indent=2, ensure_ascii=False)
+    print(f"✓ Estadísticas guardadas: {stats_path}")
 
     # Reporte final
     print("\n" + "="*70)
-    print("ESTADÍSTICAS FINALES")
+    print("📊 ESTADÍSTICAS FINALES")
     print("="*70)
-    print(f"Train: {len(dataset_dict['train'])} muestras")
-    print(f"Validation: {len(dataset_dict['validation'])} muestras")
+    print("\n📚 Dataset completo:")
+    print(f"  • Train: {len(dataset_dict['train']):,} muestras")
+    print(f"  • Validation: {len(dataset_dict['validation']):,} muestras")
+    print(f"  • Total: {len(dataset_dict['train']) + len(dataset_dict['validation']):,} muestras")
 
-    print("\nPor dialecto:")
-    for dialect, stats in dialect_stats.items():
+    print("\n🗣️  Por dialecto:")
+    total_samples = 0
+    total_speakers = 0
+    total_hours = 0
+    for dialect, stats in sorted(dialect_stats.items()):
         voice_name = DIALECT_VOICE_NAMES.get(dialect, dialect)
-        print(f"  {dialect} (voz: '{voice_name}'):")
-        print(f"    • Muestras: {stats['samples']}")
-        print(f"    • Hablantes: {stats['speakers']}")
-        print(f"    • Duración: {stats['duration_hours']:.2f} horas")
+        print(f"\n  📍 {dialect.upper()} (voz: '{voice_name}'):")
+        print(f"     • Muestras: {stats['samples']:,}")
+        print(f"     • Hablantes: {stats['speakers']:,}")
+        print(f"     • Duración: {stats['duration_hours']:.2f} horas")
+        total_samples += stats['samples']
+        total_speakers += stats['speakers']
+        total_hours += stats['duration_hours']
+
+    print("\n" + "-"*70)
+    print("  🎯 TOTALES:")
+    print(f"     • Dialectos: {len(dialect_stats)}")
+    print(f"     • Muestras: {total_samples:,}")
+    print(f"     • Hablantes: {total_speakers:,}")
+    print(f"     • Duración total: {total_hours:.2f} horas ({total_hours*60:.1f} minutos)")
+    print("-"*70)
 
     print("\n" + "="*70)
-    print("✅ PREPARACIÓN COMPLETADA")
+    print("✅ PREPARACIÓN COMPLETADA CON ÉXITO")
     print("="*70)
     print("\nPróximos pasos:")
     print("1. Tokenizar dataset:")
