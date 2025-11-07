@@ -306,28 +306,7 @@ def load_and_process_dataset(dataset_name, args):
     #)
     #print("✅ Audio feature aplicada correctamente")
 
-    print(f"\n✅ Dataset procesado: {len(processed_dataset)} ejemplos")
-        # Estadísticas
-    print("\n📊 Calculando estadísticas finales...")
-    final_speaker_counts = Counter(
-        ex['speaker_id']
-        for ex in tqdm(processed_dataset, desc="🔢 Contando hablantes")
-    )
-
-    total_duration = sum(
-        ex['duration']
-        for ex in tqdm(processed_dataset, desc="⏱️  Calculando duración total")
-    )
-
-    print("\n" + "="*70)
-    print(f"ESTADÍSTICAS FINALES - {dialect.upper()}")
-    print("="*70)
-    print(f"  📝 Ejemplos totales: {len(processed_dataset):,}")
-    print(f"  👥 Hablantes únicos: {len(final_speaker_counts):,}")
-    print(f"  📊 Promedio muestras/hablante: {len(processed_dataset)/len(final_speaker_counts):.1f}")
-    print(f"  ⏱️  Duración total: {total_duration/3600:.2f} horas ({total_duration/60:.1f} minutos)")
-    print(f"  ⏱️  Duración promedio/muestra: {total_duration/len(processed_dataset):.1f} segundos")
-    print("="*70)
+    print(f"\n✅ Dataset procesado: {len(processed_dataset):,} ejemplos")
 
     return processed_dataset, speaker_metadata
 
@@ -365,17 +344,9 @@ def main():
 
             dialect = get_variant_from_dataset_name(dataset_name)
 
-            print(f"\n📊 Calculando estadísticas del dialecto {dialect}...")
+            # Guardar estadísticas básicas (sin iterar sobre el dataset)
             dialect_stats[dialect] = {
                 'samples': len(processed_ds),
-                'speakers': len(set(
-                    ex['speaker_id']
-                    for ex in tqdm(processed_ds, desc="🔢 Contando hablantes únicos")
-                )),
-                'duration_hours': sum(
-                    ex['duration']
-                    for ex in tqdm(processed_ds, desc="⏱️  Sumando duración")
-                ) / 3600
             }
 
             if speaker_meta:
@@ -441,25 +412,12 @@ def main():
 
     print("\n🗣️  Por dialecto:")
     total_samples = 0
-    total_speakers = 0
-    total_hours = 0
     for dialect, stats in sorted(dialect_stats.items()):
         voice_name = DIALECT_VOICE_NAMES.get(dialect, dialect)
-        print(f"\n  📍 {dialect.upper()} (voz: '{voice_name}'):")
-        print(f"     • Muestras: {stats['samples']:,}")
-        print(f"     • Hablantes: {stats['speakers']:,}")
-        print(f"     • Duración: {stats['duration_hours']:.2f} horas")
+        print(f"  📍 {dialect.upper()} (voz: '{voice_name}'): {stats['samples']:,} muestras")
         total_samples += stats['samples']
-        total_speakers += stats['speakers']
-        total_hours += stats['duration_hours']
 
-    print("\n" + "-"*70)
-    print("  🎯 TOTALES:")
-    print(f"     • Dialectos: {len(dialect_stats)}")
-    print(f"     • Muestras: {total_samples:,}")
-    print(f"     • Hablantes: {total_speakers:,}")
-    print(f"     • Duración total: {total_hours:.2f} horas ({total_hours*60:.1f} minutos)")
-    print("-"*70)
+    print(f"\n  🎯 TOTAL: {len(dialect_stats)} dialectos, {total_samples:,} muestras")
 
     print("\n" + "="*70)
     print("✅ PREPARACIÓN COMPLETADA CON ÉXITO")
