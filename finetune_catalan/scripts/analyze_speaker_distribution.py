@@ -70,10 +70,18 @@ def analyze_dataset(dataset_name, args):
     print(f"Analizando: {dataset_name}")
     print(f"{'='*70}")
 
-    # Cargar dataset en modo streaming para no consumir toda la RAM
-    print("Cargando dataset en modo streaming...")
+    # Cargar dataset en modo streaming SIN decodificar audio para no consumir toda la RAM
+    print("Cargando dataset en modo streaming (sin decodificar audio)...")
     try:
+        # streaming=True: no carga todo en memoria
+        # Removemos la columna de audio completamente para evitar que se decodifique
         ds = load_dataset(dataset_name, split='train', streaming=True)
+
+        # Remover columna de audio para que no intente decodificar
+        # Esto previene que torchcodec/pyarrow intenten cargar los archivos
+        print("Removiendo columna de audio para evitar decodificación...")
+        ds = ds.remove_columns(['audio'])
+
     except Exception as e:
         print(f"Error cargando dataset: {e}")
         return None
@@ -94,14 +102,11 @@ def analyze_dataset(dataset_name, args):
         speaker_id = example.get('client_id', 'unknown')
         speaker_counts[speaker_id] += 1
 
-        # Duración (aproximada) - solo calculamos de una muestra cada 10 para ahorrar memoria
-        if i % 10 == 0 and 'audio' in example and example['audio']:
-            try:
-                duration = len(example['audio']['array']) / example['audio']['sampling_rate']
-                # Estimamos duración multiplicando por 10 (ya que solo procesamos 1 de cada 10)
-                speaker_durations[speaker_id] += duration * 10
-            except:
-                pass  # Saltamos si hay error en el audio
+        # DESHABILITADO: Calcular duración consume demasiada RAM con datasets grandes
+        # En streaming mode, acceder al audio causa que se decodifique y consuma memoria
+        # Para datasets de 1M+ muestras, esto causa std::bad_alloc
+        # Si necesitas duraciones, procesa un subset pequeño por separado
+        pass
 
         # Metadata
         if 'gender' in example and example['gender']:
@@ -429,4 +434,17 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    import traceback
+
+    try:
+        main()
+    except Exception as e:
+        print("\n" + "="*70)
+        print("❌ ERROR DURANTE LA EJECUCIÓN")
+        print("="*70)
+        print(f"\nTipo de error: {type(e).__name__}")
+        print(f"Mensaje: {str(e)}")
+        print("\nTraceback completo:")
+        traceback.print_exc()
+        sys.exit(1)
