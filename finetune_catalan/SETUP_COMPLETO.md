@@ -18,13 +18,13 @@ CUDA_VERSION=$(python3 -c "import torch; print(torch.version.cuda)")
 
 # Instalación con wheel correcto
 pip install torchvision torchaudio --index-url https://download.pytorch.org/whl/${TORCH_WHEEL}
-pip install torchcodec --index-url https://download.pytorch.org/whl/${TORCH_WHEEL}  # opcional
+pip install torchcodec==0.6.0 --index-url https://download.pytorch.org/whl/${TORCH_WHEEL}
 ```
 
 **Componentes instalados:**
 - ✅ `torchvision` - Para procesamiento de imágenes/video
 - ✅ `torchaudio` - Para procesamiento de audio
-- ✅ `torchcodec` - Codecs adicionales (opcional, con fallback si no disponible)
+- ✅ `torchcodec==0.6.0` - Versión específica compatible con datasets grandes
 
 **NO reinstala PyTorch** - RunPod ya lo tiene instalado.
 

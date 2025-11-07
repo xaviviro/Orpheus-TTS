@@ -1,11 +1,12 @@
 # Dependencias para Fine-tuning de Orpheus TTS en Catalán
 
 # PyTorch (instalar según tu versión de CUDA)
-# Para CUDA 12.1: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-# Para CUDA 11.8: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# Para CUDA 12.1: pip install torch torchvision torchaudio torchcodec==0.6.0 --index-url https://download.pytorch.org/whl/cu121
+# Para CUDA 11.8: pip install torch torchvision torchaudio torchcodec==0.6.0 --index-url https://download.pytorch.org/whl/cu118
 torch>=2.0.0
 torchvision>=0.15.0
 torchaudio>=2.0.0
+torchcodec==0.6.0  # Versión específica compatible con datasets grandes
 
 # Transformers y Datasets
 transformers>=4.40.0

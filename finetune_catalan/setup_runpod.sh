@@ -125,10 +125,10 @@ if python3 -c "import torch" 2>/dev/null; then
         pip install torchvision torchaudio --index-url https://download.pytorch.org/whl/${TORCH_WHEEL} -q
         print_status "torchvision y torchaudio instalados"
 
-        # Intentar instalar torchcodec (puede no estar disponible para todas las versiones)
-        pip install torchcodec --index-url https://download.pytorch.org/whl/${TORCH_WHEEL} -q 2>/dev/null && \
-            print_status "torchcodec instalado" || \
-            print_warning "torchcodec no disponible para ${TORCH_WHEEL} (opcional)"
+        # Instalar torchcodec 0.6.0 (versión específica compatible)
+        pip install torchcodec==0.6.0 --index-url https://download.pytorch.org/whl/${TORCH_WHEEL} -q 2>/dev/null && \
+            print_status "torchcodec 0.6.0 instalado" || \
+            print_warning "torchcodec 0.6.0 no disponible para ${TORCH_WHEEL} (opcional)"
 
     else
         print_warning "CUDA no disponible - entrenamiento será MUY lento"
@@ -142,8 +142,8 @@ else
     if [[ "$CUDA_VERSION_SYSTEM" == "12."* ]]; then
         echo "Instalando PyTorch para CUDA 12.x..."
         pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 -q
-        pip install torchcodec --index-url https://download.pytorch.org/whl/cu121 -q 2>/dev/null || \
-            print_warning "torchcodec no disponible (opcional)"
+        pip install torchcodec==0.6.0 --index-url https://download.pytorch.org/whl/cu121 -q 2>/dev/null || \
+            print_warning "torchcodec 0.6.0 no disponible (opcional)"
     else
         echo "Instalando PyTorch para CUDA 11.8..."
         pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 -q
