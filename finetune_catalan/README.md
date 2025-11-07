@@ -532,3 +532,16 @@ Para problemas o mejoras, abre un issue en el repositorio principal de Orpheus T
 ---
 
 Creado para el fine-tuning de Orpheus TTS en catalán con soporte dialectal.
+
+
+
+
+python scripts/tokenize_dataset.py \
+    --input_dir /workspace/data/processed \
+    --output_dir /workspace/data/tokenized \
+    --hf_repo xaviviro/cv_23_ca_tokenized \
+    --model_name canopylabs/orpheus-tts-0.1-pretrained \
+    --snac_model hubertsiuzdak/snac_24khz \
+    --batch_size 16 \
+    --max_length 8192 \
+    --device cuda

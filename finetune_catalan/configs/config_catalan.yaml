@@ -44,21 +44,25 @@ data:
   pad_token: 128263
   preprocessing_num_workers: 8
 
-  # Dialectos a incluir (dejar vacío para todos)
+  # Dialectos a incluir (dejar vacío [] para todos)
   accents:
+    - alacanti
     - balearic
     - central
-    - northern
     - northwestern
+    - septentrional
+    - tortosi
     - valencian
 
   # Mapeo de voces por dialecto
   voice_mapping:
-    balearic: "maria"
-    central: "pau"
-    northern: "montse"
-    northwestern: "jordi"
-    valencian: "carla"
+    alacanti: "alacanti"
+    balearic: "balear"
+    central: "central"
+    northwestern: "occidental"
+    septentrional: "septentrional"
+    tortosi: "tortosi"
+    valencian: "valencia"
 
 # Configuración del modelo
 model_config:

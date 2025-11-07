@@ -90,7 +90,45 @@ def load_training_dataset(config):
         dataset = load_from_disk(dataset_name)
     else:
         # Cargar desde HuggingFace Hub
-        dataset = load_dataset(dataset_name)
+        # Si el dataset tiene múltiples configuraciones (dialectos), cargarlas todas
+        from datasets import get_dataset_config_names, concatenate_datasets
+
+        try:
+            # Intentar obtener las configuraciones disponibles
+            configs = get_dataset_config_names(dataset_name)
+            print(f"Configuraciones disponibles: {configs}")
+
+            # Cargar todos los dialectos especificados en config o todos
+            accents = config.get('data', {}).get('accents', [])
+            if accents:
+                configs_to_load = [c for c in configs if c in accents]
+                print(f"Cargando dialectos especificados: {configs_to_load}")
+            else:
+                configs_to_load = configs
+                print(f"Cargando todos los dialectos: {configs_to_load}")
+
+            # Cargar cada configuración y combinar
+            all_train = []
+            all_val = []
+
+            for config_name in configs_to_load:
+                print(f"  Cargando dialecto: {config_name}...")
+                ds = load_dataset(dataset_name, config_name)
+                all_train.append(ds['train'])
+                if 'validation' in ds:
+                    all_val.append(ds['validation'])
+
+            # Concatenar todos los dialectos
+            from datasets import DatasetDict
+            dataset = DatasetDict({
+                'train': concatenate_datasets(all_train),
+                'validation': concatenate_datasets(all_val) if all_val else None
+            })
+
+        except Exception as e:
+            # Si no tiene configuraciones múltiples, cargar normalmente
+            print(f"Cargando dataset sin configuraciones específicas")
+            dataset = load_dataset(dataset_name)
 
     print(f"Dataset cargado:")
     print(f"  - Train: {len(dataset['train'])} ejemplos")
