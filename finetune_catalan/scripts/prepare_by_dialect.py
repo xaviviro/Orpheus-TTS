@@ -22,11 +22,13 @@ import pickle
 
 # Mapeo de variantes a nombres de voz "genéricos" por dialecto
 DIALECT_VOICE_NAMES = {
-    'central': 'central',       # Voz genérica del dialecto central
-    'balearic': 'balear',       # Voz genérica del dialecto balear
-    'northern': 'nord',         # Voz genérica del dialecto norte
-    'northwestern': 'occidental',  # Voz genérica del dialecto noroccidental
-    'valencian': 'valencia'     # Voz genérica del dialecto valenciano
+    'central': 'central',           # Dialecto central
+    'balearic': 'balear',           # Dialecto balear
+    'valencian': 'valencia',        # Dialecto valenciano
+    'alacanti': 'alacanti',         # Alacantí
+    'tortosi': 'tortosi',           # Tortosí
+    'septentrional': 'septentrional',  # Septentrional
+    'northwestern': 'occidental',   # Nord-occidental
 }
 
 
@@ -105,16 +107,24 @@ def parse_args():
 
 def get_variant_from_dataset_name(dataset_name):
     """Extrae la variante del nombre del dataset."""
-    if 'central' in dataset_name.lower():
+    dataset_lower = dataset_name.lower()
+
+    # Mapeo de patrones a variantes
+    if 'central' in dataset_lower:
         return 'central'
-    elif 'balearic' in dataset_name.lower() or 'balear' in dataset_name.lower():
+    elif 'balear' in dataset_lower:
         return 'balearic'
-    elif 'valencian' in dataset_name.lower() or 'valencia' in dataset_name.lower():
+    elif 'valencia' in dataset_lower and 'nord_occidental' not in dataset_lower:
         return 'valencian'
-    elif 'northern' in dataset_name.lower() or 'nord' in dataset_name.lower():
-        return 'northern'
-    elif 'northwestern' in dataset_name.lower():
+    elif 'alacant' in dataset_lower:
+        return 'alacanti'
+    elif 'tortosi' in dataset_lower:
+        return 'tortosi'
+    elif 'septentrional' in dataset_lower:
+        return 'septentrional'
+    elif 'nord_occidental' in dataset_lower or 'northwestern' in dataset_lower:
         return 'northwestern'
+
     return 'unknown'
 
 
@@ -412,30 +422,20 @@ def load_and_process_dataset(dataset_name, args):
         dataset_data['age'].append(ex['age'])
         dataset_data['duration'].append(ex['duration'])
 
-    # Crear dataset desde el dict estructurado
-    from datasets import Features, Value, Sequence
+    # Crear dataset desde el dict - HuggingFace inferirá los tipos automáticamente
+    print("Creando dataset...")
+    processed_dataset = Dataset.from_dict(dataset_data)
 
-    features = Features({
-        'audio': Audio(sampling_rate=args.target_sample_rate),
-        'text': Value('string'),
-        'original_text': Value('string'),
-        'voice_name': Value('string'),
-        'dialect': Value('string'),
-        'speaker_id': Value('string'),
-        'gender': Value('string'),
-        'age': Value('string'),
-        'duration': Value('float32'),
-    })
-
-    print("Creando dataset con Features explícitas...")
+    # Intentar aplicar Audio feature (opcional, el dataset funciona sin esto)
     try:
-        processed_dataset = Dataset.from_dict(dataset_data, features=features)
-        print("✅ Dataset creado correctamente con Audio feature")
+        processed_dataset = processed_dataset.cast_column(
+            'audio',
+            Audio(sampling_rate=args.target_sample_rate)
+        )
+        print("✅ Dataset creado con Audio feature")
     except Exception as e:
-        print(f"⚠️  Error creando dataset con features: {e}")
-        print("  Intentando sin features...")
-        processed_dataset = Dataset.from_dict(dataset_data)
-        print("  Dataset creado sin Audio feature (funcional pero subóptimo)")
+        print(f"⚠️  Audio feature no aplicada (dataset funcional igualmente)")
+        # No es crítico - el dataset se puede usar sin el tipo Audio formal
 
     print(f"✅ Dataset procesado: {len(processed_dataset)} ejemplos")
 
