@@ -151,8 +151,8 @@ def tokenize_example(example, tokenizer, snac_model, device, max_length):
             'input_ids': input_ids.tolist(),
             'labels': labels.tolist(),
             'text': text,
-            'voice_name': example['voice_name'],
             'accent': example['accent'],
+            'speaker_id': example.get('speaker_id', 'unknown'),
             'duration': example['duration']
         }
 

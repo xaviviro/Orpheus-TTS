@@ -248,22 +248,23 @@ def load_and_process_dataset(dataset_name, args):
     dataset = dataset.rename_column('sentence', 'text')
     print("✓ Columna renombrada")
 
-    # Añadir columna 'duration' calculada desde el audio
-    print("\n🔄 Calculando duración de audios...")
-    def add_duration(example):
+    # Añadir columna 'duration' y 'accent' (dialecto)
+    print("\n🔄 Añadiendo columnas duration y accent...")
+    def add_metadata(example):
         example['duration'] = len(example['audio']['array']) / example['audio']['sampling_rate']
+        example['accent'] = dialect
         return example
 
     dataset = dataset.map(
-        add_duration,
+        add_metadata,
         num_proc=num_proc,
-        desc="Calculando duración"
+        desc="Añadiendo metadata"
     )
-    print("✓ Duración calculada")
+    print("✓ Metadata añadida")
 
     # Eliminar todas las columnas excepto las que necesitamos
     print("\n🗑️  Eliminando columnas innecesarias...")
-    columns_to_keep = ['audio', 'text', 'duration', 'client_id']
+    columns_to_keep = ['audio', 'text', 'duration', 'accent', 'client_id']
     columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
 
     if columns_to_remove:
