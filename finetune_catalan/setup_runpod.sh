@@ -85,11 +85,11 @@ pip install --upgrade pip setuptools wheel -q
 print_status "Pip actualizado"
 
 ################################################################################
-# 4. VERIFICAR PYTORCH (RunPod ya lo tiene instalado)
+# 4. VERIFICAR Y CONFIGURAR PYTORCH
 ################################################################################
 
 echo ""
-echo "4. Verificando PyTorch..."
+echo "4. Verificando PyTorch y componentes..."
 
 # RunPod ya tiene PyTorch instalado, solo verificamos
 if python3 -c "import torch" 2>/dev/null; then
@@ -103,22 +103,53 @@ if python3 -c "import torch" 2>/dev/null; then
         GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
         print_status "CUDA disponible: ${CUDA_VERSION}"
         print_status "GPU: ${GPU_NAME}"
+
+        # Detectar versión de CUDA para instalar componentes compatibles
+        echo "Detectando versión de wheel compatible..."
+        if [[ "$CUDA_VERSION" == "12.1"* ]]; then
+            TORCH_WHEEL="cu121"
+        elif [[ "$CUDA_VERSION" == "12.4"* ]]; then
+            TORCH_WHEEL="cu124"
+        elif [[ "$CUDA_VERSION" == "11.8"* ]]; then
+            TORCH_WHEEL="cu118"
+        else
+            # Default a cu121 para CUDA 12.x
+            TORCH_WHEEL="cu121"
+        fi
+
+        print_status "Usando wheels para: ${TORCH_WHEEL}"
+
+        # Instalar torchaudio, torchvision y torchcodec compatibles
+        echo "Instalando componentes PyTorch (torchaudio, torchvision, torchcodec)..."
+
+        pip install torchvision torchaudio --index-url https://download.pytorch.org/whl/${TORCH_WHEEL} -q
+        print_status "torchvision y torchaudio instalados"
+
+        # Intentar instalar torchcodec (puede no estar disponible para todas las versiones)
+        pip install torchcodec --index-url https://download.pytorch.org/whl/${TORCH_WHEEL} -q 2>/dev/null && \
+            print_status "torchcodec instalado" || \
+            print_warning "torchcodec no disponible para ${TORCH_WHEEL} (opcional)"
+
     else
         print_warning "CUDA no disponible - entrenamiento será MUY lento"
     fi
 else
     print_error "PyTorch no está instalado"
-    echo "Instalando PyTorch..."
+    echo "Instalando PyTorch completo..."
 
     # Solo instalar si realmente no está
-    CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}' | cut -d'.' -f1,2)
-    if [[ "$CUDA_VERSION" == "12."* ]]; then
+    CUDA_VERSION_SYSTEM=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}' | cut -d'.' -f1,2)
+    if [[ "$CUDA_VERSION_SYSTEM" == "12."* ]]; then
+        echo "Instalando PyTorch para CUDA 12.x..."
         pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 -q
+        pip install torchcodec --index-url https://download.pytorch.org/whl/cu121 -q 2>/dev/null || \
+            print_warning "torchcodec no disponible (opcional)"
     else
-        pip install torch torchvision torchaudio -q
+        echo "Instalando PyTorch para CUDA 11.8..."
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 -q
     fi
 
-    print_status "PyTorch instalado"
+    print_status "PyTorch y componentes instalados"
 fi
 
 ################################################################################

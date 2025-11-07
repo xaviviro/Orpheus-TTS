@@ -2,6 +2,9 @@
 Script para analizar la distribución de hablantes en datasets de Common Voice.
 
 Ayuda a decidir la mejor estrategia: voces fijas, multi-speaker, o híbrido.
+
+NOTA: Este script usa streaming mode para manejar datasets muy grandes (1M+ muestras)
+sin consumir toda la RAM. El análisis puede tardar unos minutos pero es memory-efficient.
 """
 
 import argparse
@@ -67,37 +70,51 @@ def analyze_dataset(dataset_name, args):
     print(f"Analizando: {dataset_name}")
     print(f"{'='*70}")
 
-    # Cargar dataset
-    print("Cargando dataset...")
+    # Cargar dataset en modo streaming para no consumir toda la RAM
+    print("Cargando dataset en modo streaming...")
     try:
-        ds = load_dataset(dataset_name, split='train')
+        ds = load_dataset(dataset_name, split='train', streaming=True)
     except Exception as e:
         print(f"Error cargando dataset: {e}")
         return None
 
-    print(f"Total de muestras: {len(ds)}")
-
-    # Análisis por hablante
-    print("\nAnalizando hablantes...")
+    # Análisis por hablante - procesar en streaming
+    print("\nAnalizando hablantes (esto puede tomar unos minutos)...")
     speaker_counts = Counter()
     speaker_durations = defaultdict(float)
     speaker_genders = defaultdict(set)
     speaker_ages = defaultdict(set)
 
-    for example in ds:
+    total_samples = 0
+
+    # Procesar en streaming para no cargar todo en memoria
+    for i, example in enumerate(ds):
+        total_samples += 1
+
         speaker_id = example.get('client_id', 'unknown')
         speaker_counts[speaker_id] += 1
 
-        # Duración (aproximada)
-        if 'audio' in example and example['audio']:
-            duration = len(example['audio']['array']) / example['audio']['sampling_rate']
-            speaker_durations[speaker_id] += duration
+        # Duración (aproximada) - solo calculamos de una muestra cada 10 para ahorrar memoria
+        if i % 10 == 0 and 'audio' in example and example['audio']:
+            try:
+                duration = len(example['audio']['array']) / example['audio']['sampling_rate']
+                # Estimamos duración multiplicando por 10 (ya que solo procesamos 1 de cada 10)
+                speaker_durations[speaker_id] += duration * 10
+            except:
+                pass  # Saltamos si hay error en el audio
 
         # Metadata
         if 'gender' in example and example['gender']:
             speaker_genders[speaker_id].add(example['gender'])
         if 'age' in example and example['age']:
             speaker_ages[speaker_id].add(example['age'])
+
+        # Mostrar progreso cada 10000 muestras
+        if (i + 1) % 10000 == 0:
+            print(f"  Procesadas {i + 1} muestras, {len(speaker_counts)} hablantes únicos...", end='\r')
+
+    print(f"\n  ✅ Procesadas {total_samples} muestras totales")
+    print(f"Total de muestras: {total_samples}")
 
     # Estadísticas
     total_speakers = len(speaker_counts)
@@ -108,7 +125,7 @@ def analyze_dataset(dataset_name, args):
     stats = {
         'dataset_name': dataset_name,
         'variant': variant,
-        'total_samples': len(ds),
+        'total_samples': total_samples,
         'total_speakers': total_speakers,
         'samples_per_speaker': {
             'min': min(samples_per_speaker),
