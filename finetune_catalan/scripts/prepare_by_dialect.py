@@ -202,6 +202,29 @@ def process_example(example, target_sr, dialect_name, speaker_id=None):
         return None
 
 
+def process_simple_example_wrapper(args_tuple):
+    """
+    Wrapper global para procesar un ejemplo simplificado.
+    Necesita estar a nivel de módulo para ser serializable por pickle.
+    """
+    simple_ex, target_sr, dialect_name = args_tuple
+    try:
+        # Reconstruir el formato esperado por process_example
+        example = {
+            'audio': {
+                'array': simple_ex['audio_array'],
+                'sampling_rate': simple_ex['audio_sr']
+            },
+            'sentence': simple_ex['sentence'],
+            'client_id': simple_ex['client_id'],
+            'gender': simple_ex['gender'],
+            'age': simple_ex['age'],
+        }
+        return process_example(example, target_sr, dialect_name)
+    except Exception as e:
+        return None
+
+
 def balance_by_speakers(dataset, max_per_speaker):
     """
     Balancea el dataset limitando muestras por hablante.
@@ -337,30 +360,14 @@ def load_and_process_dataset(dataset_name, args):
     num_workers = args.num_workers if args.num_workers is not None else cpu_count()
     print(f"Usando {num_workers} workers")
 
-    # Función wrapper para multiprocessing
-    def process_simple_example(simple_ex):
-        """Procesa un ejemplo simplificado"""
-        try:
-            # Reconstruir el formato esperado por process_example
-            example = {
-                'audio': {
-                    'array': simple_ex['audio_array'],
-                    'sampling_rate': simple_ex['audio_sr']
-                },
-                'sentence': simple_ex['sentence'],
-                'client_id': simple_ex['client_id'],
-                'gender': simple_ex['gender'],
-                'age': simple_ex['age'],
-            }
-            return process_example(example, args.target_sample_rate, dialect)
-        except Exception as e:
-            return None
+    # Preparar argumentos para cada worker (tuplas con simple_ex, target_sr, dialect)
+    worker_args = [(ex, args.target_sample_rate, dialect) for ex in simple_examples]
 
-    # Procesar en paralelo
+    # Procesar en paralelo usando la función wrapper global
     with Pool(processes=num_workers) as pool:
         processed_examples = list(tqdm(
-            pool.imap(process_simple_example, simple_examples),
-            total=len(simple_examples),
+            pool.imap(process_simple_example_wrapper, worker_args),
+            total=len(worker_args),
             desc=f"Procesando {dialect}"
         ))
 
