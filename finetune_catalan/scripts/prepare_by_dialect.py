@@ -5,19 +5,19 @@ Estrategia: Entrenar voces representativas de cada dialecto, luego usar
 voice cloning para adaptar a hablantes específicos.
 
 Esta estrategia es ideal cuando tienes muchos hablantes con pocos audios cada uno.
+
+NOTA: Este script NO procesa/resamplea audio - lo deja tal cual está en el dataset original.
+Solo formatea el texto y organiza los datos por dialecto.
 """
 
-import os
 import argparse
-from datasets import load_dataset, Dataset, Audio, DatasetDict, concatenate_datasets
+from datasets import load_dataset, Dataset, DatasetDict, concatenate_datasets
 from pathlib import Path
-import librosa
 import numpy as np
 from tqdm import tqdm
 import json
-from collections import defaultdict
+from collections import defaultdict, Counter
 from multiprocessing import Pool, cpu_count
-import pickle
 
 
 # Mapeo de variantes a nombres de voz "genéricos" por dialecto
@@ -48,12 +48,6 @@ def parse_args():
         type=str,
         default='../data/processed_by_dialect',
         help='Directorio de salida'
-    )
-    parser.add_argument(
-        '--target_sample_rate',
-        type=int,
-        default=24000,
-        help='Frecuencia de muestreo objetivo'
     )
     parser.add_argument(
         '--min_duration',
@@ -138,29 +132,7 @@ def filter_by_duration(example, min_dur, max_dur):
     return min_dur <= duration <= max_dur
 
 
-def resample_audio(audio_array, orig_sr, target_sr):
-    """
-    Resamplea audio usando scipy en lugar de librosa para mayor robustez.
-
-    librosa.resample puede causar errores "stream index not added" en
-    multiprocessing con algunos arrays de audio.
-    """
-    if orig_sr == target_sr:
-        return audio_array
-
-    # Usar scipy.signal.resample que es más robusto en multiprocessing
-    from scipy import signal
-
-    # Calcular número de muestras en el nuevo sample rate
-    num_samples = int(len(audio_array) * target_sr / orig_sr)
-
-    # Resamplear
-    resampled = signal.resample(audio_array, num_samples)
-
-    return resampled.astype(np.float32)
-
-
-def process_example(example, target_sr, dialect_name, speaker_id=None):
+def process_example(example, dialect_name, speaker_id=None):
     """
     Procesa ejemplo con formato de dialecto.
 
@@ -168,6 +140,7 @@ def process_example(example, target_sr, dialect_name, speaker_id=None):
     Por ejemplo: "central: Bon dia"
 
     Guardamos también el speaker_id para posterior voice cloning.
+    NO resampleamos audio - lo dejamos tal cual está.
     """
     try:
         audio_data = example['audio']
@@ -177,12 +150,9 @@ def process_example(example, target_sr, dialect_name, speaker_id=None):
         if speaker_id is None:
             speaker_id = example.get('client_id', 'unknown')
 
-        # Resamplear
+        # Audio sin procesamiento - tal cual está
         audio_array = audio_data['array']
-        orig_sr = audio_data['sampling_rate']
-
-        if orig_sr != target_sr:
-            audio_array = resample_audio(audio_array, orig_sr, target_sr)
+        sample_rate = audio_data['sampling_rate']
 
         # Nombre de voz basado en DIALECTO (no en hablante)
         voice_name = DIALECT_VOICE_NAMES.get(dialect_name, dialect_name)
@@ -190,12 +160,12 @@ def process_example(example, target_sr, dialect_name, speaker_id=None):
         # Formato para entrenamiento: "{dialect_voice}: {text}"
         formatted_text = f"{voice_name}: {text}"
 
-        duration = len(audio_array) / target_sr
+        duration = len(audio_array) / sample_rate
 
         return {
             'audio': {
                 'array': audio_array.astype(np.float32),  # Asegurar tipo correcto
-                'sampling_rate': target_sr
+                'sampling_rate': sample_rate
             },
             'text': formatted_text,              # Para entrenamiento
             'original_text': text,               # Texto original
@@ -217,20 +187,17 @@ def process_simple_example_wrapper(args_tuple):
     Wrapper global para procesar un ejemplo simplificado.
     Necesita estar a nivel de módulo para ser serializable por pickle.
     """
-    simple_ex, target_sr, dialect_name = args_tuple
+    simple_ex, dialect_name = args_tuple
     try:
         # Reconstruir el formato esperado por process_example
         example = {
-            'audio': {
-                'array': simple_ex['audio_array'],
-                'sampling_rate': simple_ex['audio_sr']
-            },
+            'audio': simple_ex['audio'],
             'sentence': simple_ex['sentence'],
             'client_id': simple_ex['client_id'],
-            'gender': simple_ex['gender'],
-            'age': simple_ex['age'],
+            'gender': simple_ex.get('gender', 'unknown'),
+            'age': simple_ex.get('age', 'unknown'),
         }
-        return process_example(example, target_sr, dialect_name)
+        return process_example(example, dialect_name)
     except Exception as e:
         return None
 
@@ -296,7 +263,6 @@ def load_and_process_dataset(dataset_name, args):
 
     # Analizar hablantes
     print("\nAnalizando hablantes...")
-    from collections import Counter
     speaker_counts = Counter(
         ex.get('client_id', 'unknown')
         for ex in tqdm(dataset, desc="🔍 Analizando hablantes")
@@ -368,12 +334,9 @@ def load_and_process_dataset(dataset_name, args):
     simple_examples = []
     for example in tqdm(dataset, desc="📦 Extrayendo arrays de audio"):
         simple_examples.append({
-            'audio_array': example['audio']['array'],
-            'audio_sr': example['audio']['sampling_rate'],
+            'audio': example['audio'],
             'sentence': example['sentence'],
             'client_id': example.get('client_id', 'unknown'),
-            'gender': example.get('gender', 'unknown'),
-            'age': example.get('age', 'unknown'),
         })
 
     print(f"✓ Datos preparados: {len(simple_examples)} ejemplos listos")
@@ -382,8 +345,8 @@ def load_and_process_dataset(dataset_name, args):
     num_workers = args.num_workers if args.num_workers is not None else cpu_count()
     print(f"🚀 Usando {num_workers} workers para procesamiento paralelo")
 
-    # Preparar argumentos para cada worker (tuplas con simple_ex, target_sr, dialect)
-    worker_args = [(ex, args.target_sample_rate, dialect) for ex in simple_examples]
+    # Preparar argumentos para cada worker (tuplas con simple_ex, dialect)
+    worker_args = [(ex, dialect) for ex in simple_examples]
 
     # Procesar en paralelo usando la función wrapper global
     print(f"\n⚙️  Procesando {len(worker_args)} ejemplos en paralelo...")
@@ -391,7 +354,7 @@ def load_and_process_dataset(dataset_name, args):
         processed_examples = list(tqdm(
             pool.imap(process_simple_example_wrapper, worker_args),
             total=len(worker_args),
-            desc=f"🎵 Procesando audio {dialect}",
+            desc=f"🎵 Formateando ejemplos {dialect}",
             unit="samples"
         ))
 
