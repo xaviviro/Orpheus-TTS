@@ -85,27 +85,41 @@ pip install --upgrade pip setuptools wheel -q
 print_status "Pip actualizado"
 
 ################################################################################
-# 4. INSTALAR PYTORCH Y CUDA
+# 4. VERIFICAR PYTORCH (RunPod ya lo tiene instalado)
 ################################################################################
 
 echo ""
-echo "4. Instalando PyTorch con CUDA..."
+echo "4. Verificando PyTorch..."
 
-# Detectar versión de CUDA
-CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}' | cut -d'.' -f1,2)
-print_status "CUDA Version detectada: $CUDA_VERSION"
+# RunPod ya tiene PyTorch instalado, solo verificamos
+if python3 -c "import torch" 2>/dev/null; then
+    PYTORCH_VERSION=$(python3 -c "import torch; print(torch.__version__)")
+    CUDA_AVAILABLE=$(python3 -c "import torch; print(torch.cuda.is_available())")
 
-# Instalar PyTorch (ajustar según versión de CUDA)
-if [[ "$CUDA_VERSION" == "12."* ]]; then
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 -q
+    print_status "PyTorch ya está instalado: ${PYTORCH_VERSION}"
+
+    if [ "$CUDA_AVAILABLE" = "True" ]; then
+        CUDA_VERSION=$(python3 -c "import torch; print(torch.version.cuda)")
+        GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+        print_status "CUDA disponible: ${CUDA_VERSION}"
+        print_status "GPU: ${GPU_NAME}"
+    else
+        print_warning "CUDA no disponible - entrenamiento será MUY lento"
+    fi
 else
-    pip install torch torchvision torchaudio -q
+    print_error "PyTorch no está instalado"
+    echo "Instalando PyTorch..."
+
+    # Solo instalar si realmente no está
+    CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}' | cut -d'.' -f1,2)
+    if [[ "$CUDA_VERSION" == "12."* ]]; then
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 -q
+    else
+        pip install torch torchvision torchaudio -q
+    fi
+
+    print_status "PyTorch instalado"
 fi
-
-print_status "PyTorch instalado"
-
-# Verificar instalación de PyTorch
-python3 -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
 
 ################################################################################
 # 5. INSTALAR DEPENDENCIAS DE ORPHEUS TTS
@@ -194,35 +208,129 @@ cd Orpheus-TTS
 print_status "Repositorio configurado en: $(pwd)"
 
 ################################################################################
-# 9. CONFIGURAR HUGGING FACE
+# 9. CONFIGURAR CACHES EN /workspace
 ################################################################################
 
 echo ""
-echo "9. Configurando Hugging Face..."
+echo "9. Configurando caches en /workspace..."
+
+# Crear directorios de cache
+mkdir -p /workspace/hf_cache/{hub,datasets,transformers}
+mkdir -p /workspace/wandb_cache
+
+# Configurar variables de entorno para caches
+export HF_HOME=/workspace/hf_cache
+export HF_DATASETS_CACHE=/workspace/hf_cache/datasets
+export TRANSFORMERS_CACHE=/workspace/hf_cache/transformers
+export HF_HUB_CACHE=/workspace/hf_cache/hub
+export WANDB_DIR=/workspace/wandb_cache
+export WANDB_CACHE_DIR=/workspace/wandb_cache
+
+print_status "Caches configurados en /workspace:"
+echo "  - HF_HOME: /workspace/hf_cache"
+echo "  - HF_DATASETS_CACHE: /workspace/hf_cache/datasets"
+echo "  - TRANSFORMERS_CACHE: /workspace/hf_cache/transformers"
+echo "  - WANDB_DIR: /workspace/wandb_cache"
+
+################################################################################
+# 10. AUTENTICACIÓN HUGGING FACE
+################################################################################
+
+echo ""
+echo "10. Autenticación Hugging Face..."
 
 # Verificar si ya está autenticado
 if [ -f ~/.huggingface/token ]; then
-    print_status "Hugging Face ya está configurado"
+    print_status "Token de Hugging Face ya existe"
+
+    # Preguntar si quiere reautenticarse
+    echo ""
+    read -p "¿Quieres reautenticarte? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        print_status "Iniciando autenticación de Hugging Face..."
+        huggingface-cli login
+    else
+        print_status "Usando token existente"
+    fi
 else
     print_warning "No se encontró token de Hugging Face"
     echo ""
-    echo "Para autenticarte con Hugging Face, ejecuta:"
-    echo "  huggingface-cli login"
+    echo "Por favor, ingresa tu token de Hugging Face"
+    echo "Obtén tu token en: https://huggingface.co/settings/tokens"
     echo ""
+
+    huggingface-cli login
+
+    if [ $? -eq 0 ]; then
+        print_status "✓ Autenticación exitosa en Hugging Face"
+    else
+        print_error "✗ Error en la autenticación de Hugging Face"
+    fi
 fi
 
 ################################################################################
-# 10. CONFIGURAR ESTRUCTURA DE DIRECTORIOS
+# 11. AUTENTICACIÓN WANDB
 ################################################################################
 
 echo ""
-echo "10. Creando estructura de directorios..."
+echo "11. Autenticación Weights & Biases (WandB)..."
+
+# Verificar si wandb está instalado
+if command -v wandb &> /dev/null; then
+    # Verificar si ya está autenticado
+    if wandb status &> /dev/null; then
+        print_status "WandB ya está autenticado"
+
+        # Preguntar si quiere reautenticarse
+        echo ""
+        read -p "¿Quieres reautenticarte en WandB? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_status "Iniciando autenticación de WandB..."
+            wandb login
+        else
+            print_status "Usando configuración existente de WandB"
+        fi
+    else
+        echo ""
+        read -p "¿Quieres configurar WandB para logging? (Y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            print_status "Iniciando autenticación de WandB..."
+            echo ""
+            echo "Por favor, ingresa tu API key de WandB"
+            echo "Obtén tu API key en: https://wandb.ai/authorize"
+            echo ""
+
+            wandb login
+
+            if [ $? -eq 0 ]; then
+                print_status "✓ Autenticación exitosa en WandB"
+            else
+                print_warning "✗ Error en la autenticación de WandB (opcional)"
+            fi
+        else
+            print_warning "WandB no configurado (puedes hacerlo después con: wandb login)"
+        fi
+    fi
+else
+    print_warning "WandB no está instalado (se instaló con pip, puede requerir reinicio)"
+fi
+
+################################################################################
+# 12. CONFIGURAR ESTRUCTURA DE DIRECTORIOS
+################################################################################
+
+echo ""
+echo "12. Creando estructura de directorios..."
 
 # Crear directorios necesarios
 mkdir -p /workspace/data/{raw,processed,tokenized}
 mkdir -p /workspace/checkpoints
 mkdir -p /workspace/logs
 mkdir -p /workspace/outputs
+mkdir -p /workspace/analysis
 
 print_status "Estructura de directorios creada:"
 echo "  - /workspace/data/raw         (datasets sin procesar)"
@@ -231,13 +339,16 @@ echo "  - /workspace/data/tokenized   (datasets tokenizados)"
 echo "  - /workspace/checkpoints      (checkpoints del modelo)"
 echo "  - /workspace/logs             (logs de entrenamiento)"
 echo "  - /workspace/outputs          (outputs finales)"
+echo "  - /workspace/analysis         (análisis de datasets)"
+echo "  - /workspace/hf_cache         (cache HuggingFace)"
+echo "  - /workspace/wandb_cache      (cache WandB)"
 
 ################################################################################
-# 11. COPIAR SCRIPTS DE FINE-TUNING CATALÁN
+# 13. COPIAR SCRIPTS DE FINE-TUNING CATALÁN
 ################################################################################
 
 echo ""
-echo "11. Verificando scripts de fine-tuning catalán..."
+echo "13. Verificando scripts de fine-tuning catalán..."
 
 if [ -d "finetune_catalan" ]; then
     print_status "Scripts de fine-tuning catalán encontrados"
@@ -247,51 +358,65 @@ else
 fi
 
 ################################################################################
-# 12. CONFIGURAR VARIABLES DE ENTORNO
+# 14. CONFIGURAR VARIABLES DE ENTORNO PERMANENTES
 ################################################################################
 
 echo ""
-echo "12. Configurando variables de entorno..."
+echo "14. Configurando variables de entorno permanentes..."
 
 # Crear archivo de variables de entorno
-cat > /workspace/.env << EOF
+cat > /workspace/.env << 'EOF'
 # Configuración de entorno para Orpheus TTS Catalán
 
-# Directorios
+# Directorios de trabajo
 export WORK_DIR=/workspace/orpheus-catalan
 export DATA_DIR=/workspace/data
 export CHECKPOINT_DIR=/workspace/checkpoints
 export LOG_DIR=/workspace/logs
 export OUTPUT_DIR=/workspace/outputs
 
-# PyTorch
+# PyTorch optimizaciones
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 export CUDA_LAUNCH_BLOCKING=0
 
-# Hugging Face
-export HF_HOME=/workspace/.cache/huggingface
-export HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
+# Hugging Face - TODOS los caches en /workspace
+export HF_HOME=/workspace/hf_cache
+export HF_DATASETS_CACHE=/workspace/hf_cache/datasets
+export TRANSFORMERS_CACHE=/workspace/hf_cache/transformers
+export HF_HUB_CACHE=/workspace/hf_cache/hub
 
-# WandB (descomentar y configurar si usas WandB)
-# export WANDB_API_KEY=tu_api_key_aqui
-# export WANDB_PROJECT=orpheus-catalan-tts
+# WandB - Cache en /workspace
+export WANDB_DIR=/workspace/wandb_cache
+export WANDB_CACHE_DIR=/workspace/wandb_cache
+export WANDB_PROJECT=orpheus-catalan-tts
 
-# Optimizaciones
+# Optimizaciones de rendimiento
 export OMP_NUM_THREADS=8
 export TOKENIZERS_PARALLELISM=true
+
+# Para evitar warnings
+export TF_CPP_MIN_LOG_LEVEL=2
 EOF
 
-# Agregar al bashrc para persistencia
-echo "source /workspace/.env" >> ~/.bashrc
+# Agregar al bashrc para persistencia entre sesiones
+if ! grep -q "source /workspace/.env" ~/.bashrc; then
+    echo "" >> ~/.bashrc
+    echo "# Orpheus TTS Environment" >> ~/.bashrc
+    echo "source /workspace/.env" >> ~/.bashrc
+fi
 
-print_status "Variables de entorno configuradas en /workspace/.env"
+# Cargar las variables ahora
+source /workspace/.env
+
+print_status "Variables de entorno configuradas y cargadas"
+print_status "Las variables se cargarán automáticamente en nuevas sesiones"
 
 ################################################################################
-# 13. CREAR SCRIPTS DE UTILIDAD
+# 15. CREAR SCRIPTS DE UTILIDAD
 ################################################################################
 
 echo ""
-echo "13. Creando scripts de utilidad..."
+echo "15. Creando scripts de utilidad..."
 
 # Script para preparar datos
 cat > /workspace/prepare_data.sh << 'EOF'
