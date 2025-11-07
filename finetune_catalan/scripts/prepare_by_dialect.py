@@ -11,7 +11,7 @@ Solo formatea el texto y organiza los datos por dialecto.
 """
 
 import argparse
-from datasets import load_dataset, Dataset, DatasetDict, concatenate_datasets
+from datasets import load_dataset, Dataset, DatasetDict, concatenate_datasets, Audio
 from pathlib import Path
 import numpy as np
 from tqdm import tqdm
@@ -273,21 +273,18 @@ def load_and_process_dataset(dataset_name, args):
         print(f"✓ Metadata guardada para {len(speaker_metadata)} hablantes")
 
     # Procesar ejemplos - extraer solo los numpy arrays para evitar errores de stream
-    print("\n🔄 Formateando ejemplos...")
+    print("\n🔄 Extrayendo ejemplos...")
 
-    # Extraer datos y formatear
+    # Extraer datos (sin formatear el texto con dialecto)
     processed_examples = []
-    for example in tqdm(dataset, desc="🎵 Formateando ejemplos"):
+    for example in tqdm(dataset, desc="📦 Extrayendo datos"):
         try:
             # Extraer datos básicos del audio
             audio_array = example['audio']['array']
             sample_rate = example['audio']['sampling_rate']
-            text = example['sentence']
+            text = example['sentence']  # Sin prefijo de dialecto
             speaker_id = example.get('client_id', 'unknown')
 
-            # Formatear
-            voice_name = DIALECT_VOICE_NAMES.get(dialect, dialect)
-            formatted_text = f"{voice_name}: {text}"
             duration = len(audio_array) / sample_rate
 
             processed_examples.append({
@@ -295,7 +292,7 @@ def load_and_process_dataset(dataset_name, args):
                     'array': audio_array.astype(np.float32),
                     'sampling_rate': sample_rate
                 },
-                'text': formatted_text,
+                'text': text,  # Texto sin modificar
                 'duration': duration,
                 'speaker_id': speaker_id,
             })
@@ -314,13 +311,13 @@ def load_and_process_dataset(dataset_name, args):
     processed_dataset = Dataset.from_list(processed_examples)
     print(f"✓ Dataset creado con {len(processed_dataset)} ejemplos")
 
-    # Aplicar Audio feature
-    #print("\n🎵 Aplicando Audio feature...")
-    #processed_dataset = processed_dataset.cast_column(
-    #    'audio',
-    #    Audio(sampling_rate=args.target_sample_rate)
-    #)
-    #print("✅ Audio feature aplicada correctamente")
+    # Aplicar Audio feature para que se suba correctamente a HuggingFace
+    print("\n🎵 Aplicando Audio feature...")
+    processed_dataset = processed_dataset.cast_column(
+        'audio',
+        Audio(sampling_rate=args.target_sample_rate)
+    )
+    print("✅ Audio feature aplicada correctamente")
 
     print(f"\n✅ Dataset procesado: {len(processed_dataset):,} ejemplos")
 
