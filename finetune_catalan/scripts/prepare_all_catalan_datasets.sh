@@ -11,6 +11,7 @@ OUTPUT_DIR="${1:-/workspace/data/processed}"
 MAX_SAMPLES="${2:-50}"
 HF_REPO="${3:-xaviviro/cv_23_ca_distilled}"
 UPLOAD_TO_HF="${4:-yes}"  # yes/no para controlar si sube
+NUM_WORKERS="${5:-$(nproc)}"  # Número de workers (default: todos los cores)
 
 # Lista completa de tus datasets catalanes
 DATASETS=(
@@ -32,6 +33,7 @@ echo "  Output dir: $OUTPUT_DIR"
 echo "  Max samples/speaker: $MAX_SAMPLES"
 echo "  HF repo: $HF_REPO"
 echo "  Upload to HF: $UPLOAD_TO_HF"
+echo "  Workers: $NUM_WORKERS"
 echo ""
 echo "Datasets a preparar:"
 for ds in "${DATASETS[@]}"; do
@@ -55,7 +57,8 @@ python "$(dirname "$0")/prepare_by_dialect.py" \
     --datasets $DATASET_ARGS \
     --output_dir "$OUTPUT_DIR" \
     --balance_speakers \
-    --max_samples_per_speaker "$MAX_SAMPLES"
+    --max_samples_per_speaker "$MAX_SAMPLES" \
+    --num_workers "$NUM_WORKERS"
 
 echo ""
 echo "✓ Preparación de datos completada"
