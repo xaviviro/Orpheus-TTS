@@ -313,10 +313,7 @@ def load_and_process_dataset(dataset_name, args):
 
     # Aplicar Audio feature para que se suba correctamente a HuggingFace
     print("\n🎵 Aplicando Audio feature...")
-    processed_dataset = processed_dataset.cast_column(
-        'audio',
-        Audio(sampling_rate=args.target_sample_rate)
-    )
+    processed_dataset = processed_dataset.cast_column('audio', Audio())
     print("✅ Audio feature aplicada correctamente")
 
     print(f"\n✅ Dataset procesado: {len(processed_dataset):,} ejemplos")
