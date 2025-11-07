@@ -17,7 +17,6 @@ import numpy as np
 from tqdm import tqdm
 import json
 from collections import defaultdict, Counter
-from multiprocessing import Pool, cpu_count
 
 
 # Mapeo de variantes a nombres de voz "genéricos" por dialecto
@@ -89,13 +88,6 @@ def parse_args():
         action='store_true',
         help='Guardar metadata de hablantes para posterior voice cloning'
     )
-    parser.add_argument(
-        '--num_workers',
-        type=int,
-        default=None,
-        help='Número de workers para multiprocessing (None = auto-detect)'
-    )
-
     return parser.parse_args()
 
 
@@ -132,74 +124,6 @@ def filter_by_duration(example, min_dur, max_dur):
     return min_dur <= duration <= max_dur
 
 
-def process_example(example, dialect_name, speaker_id=None):
-    """
-    Procesa ejemplo con formato de dialecto.
-
-    El texto se formatea como: {dialect_voice}: {texto}
-    Por ejemplo: "central: Bon dia"
-
-    Guardamos también el speaker_id para posterior voice cloning.
-    NO resampleamos audio - lo dejamos tal cual está.
-    """
-    try:
-        audio_data = example['audio']
-        text = example['sentence']
-
-        # Si speaker_id no viene como argumento, extraerlo del ejemplo
-        if speaker_id is None:
-            speaker_id = example.get('client_id', 'unknown')
-
-        # Audio sin procesamiento - tal cual está
-        audio_array = audio_data['array']
-        sample_rate = audio_data['sampling_rate']
-
-        # Nombre de voz basado en DIALECTO (no en hablante)
-        voice_name = DIALECT_VOICE_NAMES.get(dialect_name, dialect_name)
-
-        # Formato para entrenamiento: "{dialect_voice}: {text}"
-        formatted_text = f"{voice_name}: {text}"
-
-        duration = len(audio_array) / sample_rate
-
-        return {
-            'audio': {
-                'array': audio_array.astype(np.float32),  # Asegurar tipo correcto
-                'sampling_rate': sample_rate
-            },
-            'text': formatted_text,              # Para entrenamiento
-            'original_text': text,               # Texto original
-            'voice_name': voice_name,            # Nombre de voz (dialecto)
-            'dialect': dialect_name,             # Dialecto
-            'speaker_id': speaker_id,            # ID del hablante (para voice cloning)
-            'gender': example.get('gender', 'unknown'),
-            'age': example.get('age', 'unknown'),
-            'duration': duration,
-        }
-
-    except Exception as e:
-        print(f"Error procesando ejemplo: {e}")
-        return None
-
-
-def process_simple_example_wrapper(args_tuple):
-    """
-    Wrapper global para procesar un ejemplo simplificado.
-    Necesita estar a nivel de módulo para ser serializable por pickle.
-    """
-    simple_ex, dialect_name = args_tuple
-    try:
-        # Reconstruir el formato esperado por process_example
-        example = {
-            'audio': simple_ex['audio'],
-            'sentence': simple_ex['sentence'],
-            'client_id': simple_ex['client_id'],
-            'gender': simple_ex.get('gender', 'unknown'),
-            'age': simple_ex.get('age', 'unknown'),
-        }
-        return process_example(example, dialect_name)
-    except Exception as e:
-        return None
 
 
 def balance_by_speakers(dataset, max_per_speaker):
@@ -326,48 +250,42 @@ def load_and_process_dataset(dataset_name, args):
 
         print(f"✓ Metadata guardada para {len(speaker_metadata)} hablantes")
 
-    # Procesar ejemplos con multiprocessing REAL
-    # Convertimos el dataset a una lista de dicts simples (sin objetos complejos)
-    print("\n🔄 Preparando datos para procesamiento paralelo...")
+    # Procesar ejemplos - extraer solo los numpy arrays para evitar errores de stream
+    print("\n🔄 Formateando ejemplos...")
 
-    # Extraer datos del dataset en formato simple
-    simple_examples = []
-    for example in tqdm(dataset, desc="📦 Extrayendo arrays de audio"):
-        simple_examples.append({
-            'audio': example['audio'],
-            'sentence': example['sentence'],
-            'client_id': example.get('client_id', 'unknown'),
-        })
+    # Extraer datos y formatear
+    processed_examples = []
+    for example in tqdm(dataset, desc="🎵 Formateando ejemplos"):
+        try:
+            # Extraer datos básicos del audio
+            audio_array = example['audio']['array']
+            sample_rate = example['audio']['sampling_rate']
+            text = example['sentence']
+            speaker_id = example.get('client_id', 'unknown')
 
-    print(f"✓ Datos preparados: {len(simple_examples)} ejemplos listos")
+            # Formatear
+            voice_name = DIALECT_VOICE_NAMES.get(dialect, dialect)
+            formatted_text = f"{voice_name}: {text}"
+            duration = len(audio_array) / sample_rate
 
-    # Determinar número de workers
-    num_workers = args.num_workers if args.num_workers is not None else cpu_count()
-    print(f"🚀 Usando {num_workers} workers para procesamiento paralelo")
-
-    # Preparar argumentos para cada worker (tuplas con simple_ex, dialect)
-    worker_args = [(ex, dialect) for ex in simple_examples]
-
-    # Procesar en paralelo usando la función wrapper global
-    print(f"\n⚙️  Procesando {len(worker_args)} ejemplos en paralelo...")
-    with Pool(processes=num_workers) as pool:
-        processed_examples = list(tqdm(
-            pool.imap(process_simple_example_wrapper, worker_args),
-            total=len(worker_args),
-            desc=f"🎵 Formateando ejemplos {dialect}",
-            unit="samples"
-        ))
-
-    # Filtrar Nones
-    print(f"\n🔍 Filtrando resultados...")
-    processed_examples = [ex for ex in processed_examples if ex is not None]
+            processed_examples.append({
+                'audio': {
+                    'array': audio_array.astype(np.float32),
+                    'sampling_rate': sample_rate
+                },
+                'text': formatted_text,
+                'duration': duration,
+                'speaker_id': speaker_id,
+            })
+        except Exception as e:
+            print(f"Error procesando ejemplo: {e}")
+            continue
 
     if not processed_examples:
         print(f"⚠️  No se procesaron ejemplos para {dataset_name}")
         return None, None
 
-    success_rate = len(processed_examples) / len(worker_args) * 100
-    print(f"✅ Ejemplos procesados exitosamente: {len(processed_examples)}/{len(worker_args)} ({success_rate:.1f}%)")
+    print(f"✅ Ejemplos procesados exitosamente: {len(processed_examples)}/{len(dataset)} ({len(processed_examples)/len(dataset)*100:.1f}%)")
 
     # Crear dataset directamente desde la lista de dicts
     print("\n🔨 Creando HuggingFace Dataset...")
