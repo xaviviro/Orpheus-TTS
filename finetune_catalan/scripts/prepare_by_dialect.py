@@ -11,9 +11,8 @@ Solo formatea el texto y organiza los datos por dialecto.
 """
 
 import argparse
-from datasets import load_dataset, Dataset, DatasetDict, concatenate_datasets, Audio
+from datasets import load_dataset, DatasetDict, concatenate_datasets
 from pathlib import Path
-import numpy as np
 from tqdm import tqdm
 import json
 from collections import defaultdict, Counter
@@ -166,7 +165,7 @@ def balance_by_speakers(dataset, max_per_speaker):
 
 
 def load_and_process_dataset(dataset_name, args):
-    """Carga y procesa un dataset por dialecto."""
+    """Carga y procesa un dataset por dialecto usando métodos nativos de datasets."""
     print(f"\n{'='*70}")
     print(f"Procesando: {dataset_name}")
     print(f"{'='*70}")
@@ -174,7 +173,6 @@ def load_and_process_dataset(dataset_name, args):
     # Detectar dialecto
     dialect = get_variant_from_dataset_name(dataset_name)
     print(f"Dialecto detectado: {dialect}")
-    print(f"Voz de entrenamiento: {DIALECT_VOICE_NAMES.get(dialect, dialect)}")
 
     # Cargar dataset
     print("\n📥 Cargando dataset desde HuggingFace Hub...")
@@ -204,10 +202,10 @@ def load_and_process_dataset(dataset_name, args):
     print(f"✓ Filtrado completado: {filtered_len}/{original_len} muestras ({filtered_len/original_len*100:.1f}% conservadas)")
 
     # Analizar hablantes
-    print("\nAnalizando hablantes...")
+    print("\n🔍 Analizando hablantes...")
     speaker_counts = Counter(
         ex.get('client_id', 'unknown')
-        for ex in tqdm(dataset, desc="🔍 Analizando hablantes")
+        for ex in tqdm(dataset, desc="Contando hablantes")
     )
 
     # Filtrar hablantes con muy pocas muestras
@@ -241,84 +239,63 @@ def load_and_process_dataset(dataset_name, args):
 
     # Limitar número total si se especifica
     if args.samples_per_dialect and len(dataset) > args.samples_per_dialect:
-        print(f"\nLimitando a {args.samples_per_dialect} muestras...")
+        print(f"\n🔍 Limitando a {args.samples_per_dialect} muestras...")
         dataset = dataset.shuffle(seed=42).select(range(args.samples_per_dialect))
+        print(f"✓ Limitado a {len(dataset)} muestras")
 
-    # Guardar metadata de hablantes (para voice cloning posterior)
+    # Renombrar columna 'sentence' a 'text' usando map
+    print("\n🔄 Renombrando columna 'sentence' a 'text'...")
+    dataset = dataset.rename_column('sentence', 'text')
+    print("✓ Columna renombrada")
+
+    # Añadir columna 'duration' calculada desde el audio
+    print("\n🔄 Calculando duración de audios...")
+    def add_duration(example):
+        example['duration'] = len(example['audio']['array']) / example['audio']['sampling_rate']
+        return example
+
+    dataset = dataset.map(
+        add_duration,
+        num_proc=num_proc,
+        desc="Calculando duración"
+    )
+    print("✓ Duración calculada")
+
+    # Eliminar todas las columnas excepto las que necesitamos
+    print("\n🗑️  Eliminando columnas innecesarias...")
+    columns_to_keep = ['audio', 'text', 'duration', 'client_id']
+    columns_to_remove = [col for col in dataset.column_names if col not in columns_to_keep]
+
+    if columns_to_remove:
+        print(f"  Eliminando: {', '.join(columns_to_remove)}")
+        dataset = dataset.remove_columns(columns_to_remove)
+
+    # Renombrar client_id a speaker_id
+    if 'client_id' in dataset.column_names:
+        dataset = dataset.rename_column('client_id', 'speaker_id')
+
+    print(f"✓ Columnas finales: {', '.join(dataset.column_names)}")
+
+    # Guardar metadata de hablantes (solo si se solicita)
     speaker_metadata = None
     if args.save_speaker_metadata:
         print("\n📋 Guardando metadata de hablantes...")
         speaker_metadata = {}
 
         for example in tqdm(dataset, desc="📝 Extrayendo metadata"):
-            speaker_id = example.get('client_id', 'unknown')
+            speaker_id = example.get('speaker_id', 'unknown')
             if speaker_id not in speaker_metadata:
                 speaker_metadata[speaker_id] = {
                     'dialect': dialect,
-                    'samples': [],
-                    'gender': example.get('gender', 'unknown'),
-                    'age': example.get('age', 'unknown'),
+                    'samples': 0
                 }
-
-        # Agregar ejemplos representativos (primeros 3 de cada hablante)
-        speaker_samples = defaultdict(list)
-        for i, example in enumerate(tqdm(dataset, desc="🎯 Seleccionando ejemplos representativos")):
-            speaker_id = example.get('client_id', 'unknown')
-            if len(speaker_samples[speaker_id]) < 3:
-                speaker_samples[speaker_id].append(i)
-
-        for speaker_id, indices in speaker_samples.items():
-            speaker_metadata[speaker_id]['representative_indices'] = indices
+            speaker_metadata[speaker_id]['samples'] += 1
 
         print(f"✓ Metadata guardada para {len(speaker_metadata)} hablantes")
 
-    # Procesar ejemplos - extraer solo los numpy arrays para evitar errores de stream
-    print("\n🔄 Extrayendo ejemplos...")
+    print(f"\n✅ Dataset procesado: {len(dataset):,} ejemplos")
 
-    # Extraer datos (sin formatear el texto con dialecto)
-    processed_examples = []
-    for example in tqdm(dataset, desc="📦 Extrayendo datos"):
-        try:
-            # Extraer datos básicos del audio
-            audio_array = example['audio']['array']
-            sample_rate = example['audio']['sampling_rate']
-            text = example['sentence']  # Sin prefijo de dialecto
-            speaker_id = example.get('client_id', 'unknown')
-
-            duration = len(audio_array) / sample_rate
-
-            processed_examples.append({
-                'audio': {
-                    'array': audio_array.astype(np.float32),
-                    'sampling_rate': sample_rate
-                },
-                'text': text,  # Texto sin modificar
-                'duration': duration,
-                'speaker_id': speaker_id,
-            })
-        except Exception as e:
-            print(f"Error procesando ejemplo: {e}")
-            continue
-
-    if not processed_examples:
-        print(f"⚠️  No se procesaron ejemplos para {dataset_name}")
-        return None, None
-
-    print(f"✅ Ejemplos procesados exitosamente: {len(processed_examples)}/{len(dataset)} ({len(processed_examples)/len(dataset)*100:.1f}%)")
-
-    # Crear dataset directamente desde la lista de dicts
-    print("\n🔨 Creando HuggingFace Dataset...")
-    processed_dataset = Dataset.from_list(processed_examples)
-    print(f"✓ Dataset creado con {len(processed_dataset)} ejemplos")
-
-    # Aplicar Audio feature para que se suba correctamente a HuggingFace
-    print("\n🎵 Aplicando Audio feature...")
-    processed_dataset = processed_dataset.cast_column('audio', Audio())
-    print("✅ Audio feature aplicada correctamente")
-
-    print(f"\n✅ Dataset procesado: {len(processed_dataset):,} ejemplos")
-
-    return processed_dataset, speaker_metadata
+    return dataset, speaker_metadata
 
 
 def main():
