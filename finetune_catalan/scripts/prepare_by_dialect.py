@@ -16,7 +16,8 @@ import numpy as np
 from tqdm import tqdm
 import json
 from collections import defaultdict
-from multiprocessing import cpu_count
+from multiprocessing import Pool, cpu_count
+import pickle
 
 
 # Mapeo de variantes a nombres de voz "genéricos" por dialecto
@@ -314,19 +315,57 @@ def load_and_process_dataset(dataset_name, args):
         for speaker_id, indices in speaker_samples.items():
             speaker_metadata[speaker_id]['representative_indices'] = indices
 
-    # Procesar ejemplos (secuencial debido a limitaciones de serialización de audio)
-    # El audio con formato dict {'array': ..., 'sampling_rate': ...} no se puede
-    # serializar correctamente en multiprocessing, causando errores de AudioEncoder
-    print("\nProcesando ejemplos...")
+    # Procesar ejemplos con multiprocessing REAL
+    # Convertimos el dataset a una lista de dicts simples (sin objetos complejos)
+    print("\nPreparando datos para procesamiento paralelo...")
 
-    # Nota: intentamos multiprocessing pero el formato de audio causa problemas
-    # La solución es procesar secuencialmente o usar un enfoque diferente
-    processed_examples = []
+    # Extraer datos del dataset en formato simple
+    simple_examples = []
+    for example in dataset:
+        simple_examples.append({
+            'audio_array': example['audio']['array'],
+            'audio_sr': example['audio']['sampling_rate'],
+            'sentence': example['sentence'],
+            'client_id': example.get('client_id', 'unknown'),
+            'gender': example.get('gender', 'unknown'),
+            'age': example.get('age', 'unknown'),
+        })
 
-    for example in tqdm(dataset, desc=f"Procesando {dialect}"):
-        processed = process_example(example, args.target_sample_rate, dialect)
-        if processed is not None:
-            processed_examples.append(processed)
+    print(f"Procesando {len(simple_examples)} ejemplos con multiprocessing...")
+
+    # Determinar número de workers
+    num_workers = args.num_workers if args.num_workers is not None else cpu_count()
+    print(f"Usando {num_workers} workers")
+
+    # Función wrapper para multiprocessing
+    def process_simple_example(simple_ex):
+        """Procesa un ejemplo simplificado"""
+        try:
+            # Reconstruir el formato esperado por process_example
+            example = {
+                'audio': {
+                    'array': simple_ex['audio_array'],
+                    'sampling_rate': simple_ex['audio_sr']
+                },
+                'sentence': simple_ex['sentence'],
+                'client_id': simple_ex['client_id'],
+                'gender': simple_ex['gender'],
+                'age': simple_ex['age'],
+            }
+            return process_example(example, args.target_sample_rate, dialect)
+        except Exception as e:
+            return None
+
+    # Procesar en paralelo
+    with Pool(processes=num_workers) as pool:
+        processed_examples = list(tqdm(
+            pool.imap(process_simple_example, simple_examples),
+            total=len(simple_examples),
+            desc=f"Procesando {dialect}"
+        ))
+
+    # Filtrar Nones
+    processed_examples = [ex for ex in processed_examples if ex is not None]
 
     if not processed_examples:
         print(f"⚠️  No se procesaron ejemplos para {dataset_name}")
@@ -335,20 +374,61 @@ def load_and_process_dataset(dataset_name, args):
     print(f"Ejemplos procesados exitosamente: {len(processed_examples)}")
 
     # Crear dataset desde lista de ejemplos procesados
+    # Para evitar problemas con AudioEncoder, guardar arrays como bytes en la columna audio
     print("Creando dataset desde ejemplos procesados...")
-    processed_dataset = Dataset.from_list(processed_examples)
 
-    # Cast la columna audio al tipo Audio de HuggingFace
-    print("Aplicando Audio feature a la columna audio...")
+    # Preparar datos para Dataset - mantener audio como dict pero será parseado correctamente
+    dataset_data = {
+        'audio': [],
+        'text': [],
+        'original_text': [],
+        'voice_name': [],
+        'dialect': [],
+        'speaker_id': [],
+        'gender': [],
+        'age': [],
+        'duration': [],
+    }
+
+    for ex in processed_examples:
+        # Para cada ejemplo, agregar el array de audio directamente
+        dataset_data['audio'].append({
+            'array': ex['audio']['array'],
+            'sampling_rate': ex['audio']['sampling_rate']
+        })
+        dataset_data['text'].append(ex['text'])
+        dataset_data['original_text'].append(ex['original_text'])
+        dataset_data['voice_name'].append(ex['voice_name'])
+        dataset_data['dialect'].append(ex['dialect'])
+        dataset_data['speaker_id'].append(ex['speaker_id'])
+        dataset_data['gender'].append(ex['gender'])
+        dataset_data['age'].append(ex['age'])
+        dataset_data['duration'].append(ex['duration'])
+
+    # Crear dataset desde el dict estructurado
+    from datasets import Features, Value, Sequence
+
+    features = Features({
+        'audio': Audio(sampling_rate=args.target_sample_rate),
+        'text': Value('string'),
+        'original_text': Value('string'),
+        'voice_name': Value('string'),
+        'dialect': Value('string'),
+        'speaker_id': Value('string'),
+        'gender': Value('string'),
+        'age': Value('string'),
+        'duration': Value('float32'),
+    })
+
+    print("Creando dataset con Features explícitas...")
     try:
-        processed_dataset = processed_dataset.cast_column(
-            'audio',
-            Audio(sampling_rate=args.target_sample_rate)
-        )
-        print("✅ Audio feature aplicada correctamente")
+        processed_dataset = Dataset.from_dict(dataset_data, features=features)
+        print("✅ Dataset creado correctamente con Audio feature")
     except Exception as e:
-        print(f"⚠️  Advertencia con cast_column: {e}")
-        print("  El audio sigue disponible, solo sin el tipo Audio formal")
+        print(f"⚠️  Error creando dataset con features: {e}")
+        print("  Intentando sin features...")
+        processed_dataset = Dataset.from_dict(dataset_data)
+        print("  Dataset creado sin Audio feature (funcional pero subóptimo)")
 
     print(f"✅ Dataset procesado: {len(processed_dataset)} ejemplos")
 
