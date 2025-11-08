@@ -211,7 +211,7 @@ def create_training_arguments(config):
         eval_steps=training_config.get('eval_steps', 500),
 
         # Otros
-        remove_unused_columns=False,
+        remove_unused_columns=True,
         load_best_model_at_end=True,
         metric_for_best_model='loss',
         greater_is_better=False,
