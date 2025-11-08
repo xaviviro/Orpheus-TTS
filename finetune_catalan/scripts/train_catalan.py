@@ -241,22 +241,15 @@ def main():
     # Cargar dataset
     dataset = load_training_dataset(config)
 
-    # Preparar data collator
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False,  # Causal LM, no masked LM
-    )
-
     # Crear argumentos de entrenamiento
     training_args = create_training_arguments(config)
 
-    # Crear trainer
+    # Crear trainer (sin data_collator, como el original)
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset['train'],
         eval_dataset=dataset.get('validation'),
-        data_collator=data_collator,
     )
 
     # Entrenar
