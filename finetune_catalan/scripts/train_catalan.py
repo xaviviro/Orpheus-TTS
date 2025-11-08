@@ -61,6 +61,11 @@ def load_model_and_tokenizer(config):
     # Cargar tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
+    # Configurar pad_token si no existe
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        print(f"pad_token configurado como eos_token: {tokenizer.pad_token}")
+
     # Cargar modelo
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -68,6 +73,9 @@ def load_model_and_tokenizer(config):
         use_cache=model_config.get('use_cache', False),
         dtype=torch.bfloat16 if config['training'].get('bf16', True) else torch.float32
     )
+
+    # Resize token embeddings si es necesario
+    model.resize_token_embeddings(len(tokenizer))
 
     # Habilitar gradient checkpointing si está configurado
     if config.get('advanced', {}).get('gradient_checkpointing', False):
