@@ -4,7 +4,7 @@ Basado exactamente en el script original de ./finetune/train.py
 """
 
 from datasets import load_dataset, load_from_disk
-from transformers import AutoModelForCausalLM, Trainer, TrainingArguments, AutoTokenizer
+from transformers import AutoModelForCausalLM, Trainer, TrainingArguments, AutoTokenizer, DataCollatorForLanguageModeling
 import numpy as np
 import yaml
 import wandb
@@ -45,6 +45,11 @@ def main():
     # Cargar tokenizer y modelo
     print(f"Cargando modelo: {model_name}")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    # Configurar pad_token si no existe
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         attn_implementation=attn_implementation
@@ -65,6 +70,12 @@ def main():
     # Inicializar WandB
     wandb.init(project=project_name, name=run_name)
 
+    # Crear data collator para padding dinámico
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False  # Causal LM, no masked LM
+    )
+
     # Configurar argumentos de entrenamiento (exactamente como el original)
     training_args = TrainingArguments(
         overwrite_output_dir=True,
@@ -79,11 +90,12 @@ def main():
         learning_rate=learning_rate,
     )
 
-    # Crear trainer (exactamente como el original)
+    # Crear trainer con data_collator para manejar padding
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_ds,
+        data_collator=data_collator,
     )
 
     # Entrenar

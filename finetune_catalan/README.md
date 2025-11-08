@@ -545,3 +545,13 @@ python scripts/tokenize_dataset.py \
     --batch_size 16 \
     --max_length 8192 \
     --device cuda
+
+
+python scripts/tokenize_simple.py --input_dir /workspace/data/processed --output_dir /workspace/data/tokenized_simple
+
+
+python scripts/upload_to_hf.py \
+  --dataset_dir /workspace/data/tokenized_simple \
+  --hf_repo xaviviro/cv_23_ca_distilled_tokenized \
+  --private \
+  --commit_message "Initial upload of tokenized dataset
