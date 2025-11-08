@@ -1,5 +1,5 @@
 # CHANGE THIS TO YOUR OWN DATASET
-TTS_dataset: <PATH_TO_YOUR_DATASET>
+TTS_dataset: "/workspace/data/tokenized_simple"
 
 model_name: "canopylabs/orpheus-tts-0.1-pretrained"
 
