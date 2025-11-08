@@ -1,0 +1,17 @@
+# Config para usar dataset tokenizado catalán con script original
+TTS_dataset: "/workspace/data/tokenized_simple"
+
+model_name: "canopylabs/orpheus-tts-0.1-pretrained"
+
+# Training Args
+epochs: 3
+batch_size: 2
+number_processes: 1
+pad_token: 128263
+save_steps: 500
+learning_rate: 5.0e-5
+
+# Naming and paths
+save_folder: "checkpoints_catalan"
+project_name: "orpheus-catalan-tts"
+run_name: "catalan-5e5"
