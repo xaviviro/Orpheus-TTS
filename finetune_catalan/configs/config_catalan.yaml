@@ -2,7 +2,7 @@
 # Con soporte para variantes dialectales
 
 # Dataset - CAMBIAR A TU DATASET PROCESADO
-TTS_dataset: "xaviviro/cv_23_ca_distilled"  # O ruta local como "./data/tokenized"
+TTS_dataset: "/workspace/data/tokenized"  # Dataset ya tokenizado localmente
 
 # Modelo base
 model_name: "canopylabs/orpheus-tts-0.1-pretrained"
