@@ -241,6 +241,20 @@ def main():
     # Cargar dataset
     dataset = load_training_dataset(config)
 
+    # Eliminar columnas innecesarias (labels se crean automáticamente)
+    # Solo mantener input_ids
+    columns_to_remove = [col for col in dataset['train'].column_names if col != 'input_ids']
+    if columns_to_remove:
+        print(f"\nEliminando columnas: {columns_to_remove}")
+        train_dataset = dataset['train'].remove_columns(columns_to_remove)
+        if 'validation' in dataset:
+            eval_dataset = dataset['validation'].remove_columns(columns_to_remove)
+        else:
+            eval_dataset = None
+    else:
+        train_dataset = dataset['train']
+        eval_dataset = dataset.get('validation')
+
     # Crear argumentos de entrenamiento
     training_args = create_training_arguments(config)
 
@@ -255,8 +269,8 @@ def main():
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=dataset['train'],
-        eval_dataset=dataset.get('validation'),
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         data_collator=data_collator,
     )
 
