@@ -244,12 +244,20 @@ def main():
     # Crear argumentos de entrenamiento
     training_args = create_training_arguments(config)
 
-    # Crear trainer (sin data_collator, como el original)
+    # Data collator para manejar padding dinámico
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False,  # Causal LM, no masked LM
+        pad_to_multiple_of=8  # Para optimizar en GPU
+    )
+
+    # Crear trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset['train'],
         eval_dataset=dataset.get('validation'),
+        data_collator=data_collator,
     )
 
     # Entrenar
